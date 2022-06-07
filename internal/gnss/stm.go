@@ -1,4 +1,4 @@
-// Copyright 2021 Clayton Craft <clayton@craftyguy.net>
+// Copyright 2022 Clayton Craft <clayton@craftyguy.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 package gnss
@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/tarm/serial"
 	"gitlab.com/postmarketOS/gnss-share/internal/nmea"
@@ -219,6 +221,12 @@ func (s *StmCommon) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- e
 		return
 	}
 	defer s.close()
+
+	// TODO: allow disabling this in config:
+	if err := s.setTime(); err != nil {
+		errCh <- fmt.Errorf("gnss/stm.Start: %w", err)
+		return
+	}
 
 	for {
 		select {
@@ -600,6 +608,65 @@ func (s *StmCommon) loadAlmanac(path string) (err error) {
 	_, err = s.batchSendCmd(lines, false)
 	if err != nil {
 		return fmt.Errorf("gnss/StmCommon.loadAlmanac: %w", err)
+	}
+
+	return
+}
+
+// Set the time for the module if it deviates from host/OS time.
+func (s *StmCommon) setTime() (err error) {
+	fmt.Println("Checking date/time on module...")
+	var rawTime, rawDate string
+
+	for {
+		line, err := s.readline()
+		if err != nil {
+			err = fmt.Errorf("stm/setTime: %w", err)
+			return err
+		}
+		// RMC contains both date and time from the module
+		if !strings.HasPrefix(line, "$GPRMC") {
+			continue
+		}
+
+		parts := strings.Split(line, ",")
+		if len(parts) < 10 {
+			// malformed RMC sentence
+			continue
+		}
+
+		// $GPRMC,232520.000,A,XXXXXXXX,N,YYYYYYYYYY,W,0.3,326.7,060622,,,A*76
+		rawTime = parts[1]
+		rawDate = parts[9]
+		break
+	}
+
+	moduleTime, err := time.Parse("020106150405", rawDate+rawTime)
+	if err != nil {
+		err = fmt.Errorf("stm/setTime: %w", err)
+		return
+	}
+
+	// Only update date/time on module if it's more than 30 seconds off
+	now := time.Now().UTC()
+	diff := now.Sub(moduleTime)
+	if math.Abs(diff.Seconds()) < 30.0 {
+		return
+	}
+
+	fmt.Println("Module date/time is incorrect, setting to host date/time...")
+
+	_, err = s.sendCmd(nmea.Sentence{Type: "PSTMINITTIME", Data: []string{fmt.Sprintf("%02d,%02d,%04d,%02d,%02d,%02d",
+		now.Day(),
+		now.Month(),
+		now.Year(),
+		now.Hour(),
+		now.Minute(),
+		now.Second(),
+	)}}.String(), true)
+	if err != nil {
+		err = fmt.Errorf("stm/setTime: %w", err)
+		return
 	}
 
 	return
