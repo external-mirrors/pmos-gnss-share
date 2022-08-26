@@ -76,8 +76,8 @@ func (s *StmSerial) open() (err error) {
 	s.refMu.Lock()
 	defer s.refMu.Unlock()
 
-	if s.openRefs > 0 {
-		s.openRefs++
+	s.openRefs++
+	if s.openRefs > 1 {
 		return
 	}
 	s.serPort, err = serial.OpenPort(&s.serConf)
@@ -87,7 +87,6 @@ func (s *StmSerial) open() (err error) {
 	}
 	s.scanner = bufio.NewScanner(s.serPort)
 	s.writer = s.serPort
-	s.openRefs++
 
 	return
 }
@@ -96,7 +95,8 @@ func (s *StmSerial) close() (err error) {
 	s.refMu.Lock()
 	defer s.refMu.Unlock()
 
-	if s.openRefs > 1 {
+	s.openRefs--
+	if s.openRefs >= 1 {
 		return
 	}
 
@@ -106,7 +106,6 @@ func (s *StmSerial) close() (err error) {
 		return
 	}
 	s.serPort = nil
-	s.openRefs = 0
 
 	return
 }
