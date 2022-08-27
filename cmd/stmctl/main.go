@@ -22,6 +22,8 @@ func main() {
 	flag.IntVar(&baud, "b", 9600, "Baud rate, only applicable if STM device is a serial device *not* using the Linux GNSS subsystem.")
 	var serial bool
 	flag.BoolVar(&serial, "s", false, "STM device is a serial device (e.g. /dev/tty*) *not* using the Linux GNSS subsystem")
+	var debug bool
+	flag.BoolVar(&debug, "debug", false, "Enable printing debug output.")
 
 	var help bool
 	flag.BoolVar(&help, "h", false, "Print help and quit.")
