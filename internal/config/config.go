@@ -5,7 +5,7 @@ package config
 
 import (
 	"fmt"
-	"os"
+	"io/ioutil"
 
 	toml "github.com/pelletier/go-toml"
 )
@@ -20,7 +20,7 @@ type Config struct {
 }
 
 func Parse(file string) (c *Config, err error) {
-	contents, err := os.ReadFile(file)
+	contents, err := ioutil.ReadFile(file)
 	if err != nil {
 		err = fmt.Errorf("config.Parse(): %w", err)
 		return
