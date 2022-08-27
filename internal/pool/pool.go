@@ -45,7 +45,11 @@ func (p *Pool) Start() {
 			msg = append(msg, byte('\n'))
 			p.Lock()
 			for c := range p.Clients {
-				c.Send <- msg
+				select {
+				case c.Send <- msg:
+				default:
+					// don't deadlock if a client isn't receiving for some reason
+				}
 			}
 			p.Unlock()
 		}
