@@ -18,7 +18,7 @@ type Pool struct {
 	Unregister chan *Client
 	Clients    map[*Client]bool
 	Broadcast  chan []byte
-	mu         sync.Mutex
+	sync.Mutex
 }
 
 func New() *Pool {
@@ -34,25 +34,27 @@ func (p *Pool) Start() {
 	for {
 		select {
 		case c := <-p.Register:
-			p.mu.Lock()
+			p.Lock()
 			p.Clients[c] = true
-			p.mu.Unlock()
+			p.Unlock()
 		case c := <-p.Unregister:
-			p.mu.Lock()
+			p.Lock()
 			delete(p.Clients, c)
-			p.mu.Unlock()
+			p.Unlock()
 		case msg := <-p.Broadcast:
 			msg = append(msg, byte('\n'))
+			p.Lock()
 			for c := range p.Clients {
 				c.Send <- msg
 			}
+			p.Unlock()
 		}
 	}
 }
 
 func (p *Pool) Count() (count int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.Lock()
+	defer p.Unlock()
 
 	count = len(p.Clients)
 	return
