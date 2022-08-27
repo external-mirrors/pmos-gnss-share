@@ -26,6 +26,8 @@ func main() {
 	flag.StringVar(&confFile, "c", "/etc/gnss-share.conf", "Configuration file to use.")
 	var help bool
 	flag.BoolVar(&help, "h", false, "Print help and quit.")
+	var debug bool
+	flag.BoolVar(&debug, "d", false, "Enable printing debug output.")
 
 	flag.Usage = func() {
 		fmt.Println("usage: gnss-share COMMAND [OPTION...]")
