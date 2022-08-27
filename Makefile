@@ -1,0 +1,72 @@
+# based off of the Makefile for aerc:
+# https://git.sr.ht/~rjarry/aerc/tree/master/item/Makefile
+
+.POSIX:
+.SUFFIXES:
+.SUFFIXES: .1 .1.scd .5 .5.scd
+
+VERSION?=`git describe --tags --dirty 2>/dev/null || echo 0.0.0`
+VPATH=doc
+PREFIX?=/usr/local
+BINDIR?=$(PREFIX)/bin
+SHAREDIR?=$(PREFIX)/share
+SYSCONFDIR?=/etc
+MANDIR?=$(PREFIX)/share/man
+GO?=go
+GOFLAGS?=
+LDFLAGS+=-X main.Version=$(VERSION) -s -w
+RM?=rm -f
+
+GOSRC!=find * -name '*.go'
+GOSRC+=go.mod go.sum
+
+all: gnss-share stmctl
+
+gnss-share: $(GOSRC)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o gnss-share ./cmd/gnss-share
+
+stmctl: $(GOSRC)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o stmctl ./cmd/stmctl
+
+.PHONY: fmt
+fmt:
+	gofmt -w .
+
+# NOTE: most of the skipped staticcheck tests are from the default, SA1019
+# skips the ioutil deprecation warning since some distros (Debian) are only on
+# Go 1.15, which was before some ioutil functionality was moved into other
+# modules (e.g. os.)
+# See: https://staticcheck.io/docs/configuration
+test:
+	@if [ `gofmt -l . | wc -l` -ne 0 ]; then \
+		gofmt -d .; \
+		echo "ERROR: source files need reformatting with gofmt"; \
+		exit 1; \
+	fi
+	@staticcheck -checks all,-ST1000,-ST1003,-ST1016,-ST1020,-ST1021,-ST1022,-ST1023,-SA1019 ./...
+	@go test -race -count=1 ./...
+
+clean:
+	$(RM) gnss-share stmctl
+
+install: gnss-share stmctl
+	mkdir -m755 -p $(DESTDIR)$(BINDIR)
+	install -m755 gnss-share $(DESTDIR)$(BINDIR)/
+	install -m755 stmctl $(DESTDIR)$(BINDIR)/
+	mkdir -m755 -p $(DESTDIR)$(SYSCONFDIR)
+	install -m644 gnss-share.conf $(DESTDIR)$(BINDIR)/
+
+.PHONY: checkinstall
+checkinstall:
+	test -e $(DESTDIR)$(BINDIR)/gnss-share
+	test -e $(DESTDIR)$(BINDIR)/stmctl
+	test -e $(DESTDIR)$(BINDIR)/gnss-share.conf 
+
+RMDIR_IF_EMPTY:=sh -c '! [ -d $$0 ] || ls -1qA $$0 | grep -q . || rmdir $$0'
+
+uninstall:
+	$(RM) $(DESTDIR)$(BINDIR)/gnss-share
+	$(RM) $(DESTDIR)$(BINDIR)/stmctl
+	$(RM) $(DESTDIR)$(BINDIR)/gnss-share.conf 
+
+.PHONY: all clean install uninstall test
