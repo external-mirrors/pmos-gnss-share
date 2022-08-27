@@ -39,6 +39,7 @@ type StmCommon struct {
 	devMu    sync.Mutex
 	refMu    sync.Mutex
 	openRefs int
+	debug    bool
 }
 
 // StmGnss is a STM module connected through the GNSS subsystem in the Linux
@@ -57,14 +58,15 @@ type StmSerial struct {
 	serPort *serial.Port
 }
 
-func NewStmSerial(path string, baud int) *StmSerial {
+func NewStmSerial(path string, baud int, debug bool) *StmSerial {
 	s := StmSerial{
 		serConf: serial.Config{
 			Name: path,
 			Baud: baud,
 		},
 		StmCommon: StmCommon{
-			path: path,
+			path:  path,
+			debug: debug,
 		},
 	}
 	s.StmCommon.Stm = &s
@@ -114,10 +116,11 @@ func (s *StmSerial) ready() (bool, error) {
 	return true, nil
 }
 
-func NewStmGnss(path string) *StmGnss {
+func NewStmGnss(path string, debug bool) *StmGnss {
 	s := StmGnss{
 		StmCommon: StmCommon{
-			path: path,
+			path:  path,
+			debug: debug,
 		},
 	}
 	s.StmCommon.Stm = &s
@@ -497,7 +500,9 @@ func (s *StmCommon) sendCmd(cmd string, isAcked bool) (out []string, err error) 
 			err = fmt.Errorf("gnss/StmCommon.sendCmd: %w", err)
 			return
 		}
-		fmt.Printf("read: %s\n", line)
+		if s.debug {
+			fmt.Printf("read: %s\n", line)
+		}
 
 		// Command it echo'd back when it is complete.
 		if line == cmd {
@@ -529,7 +534,9 @@ func (s *StmCommon) resume() (err error) {
 }
 
 func (s *StmCommon) write(data []byte) (err error) {
-	fmt.Printf("write: %s\n", string(data))
+	if s.debug {
+		fmt.Printf("write: %s\n", string(data))
+	}
 	// add crlf
 	_, err = s.writer.Write(append(data, 0x0D, 0x0A))
 	if err != nil {

@@ -55,9 +55,9 @@ func main() {
 
 	switch conf.Driver {
 	case "stm":
-		driver = gnss.NewStmGnss(conf.DevicePath)
+		driver = gnss.NewStmGnss(conf.DevicePath, debug)
 	case "stm_serial":
-		driver = gnss.NewStmSerial(conf.DevicePath, conf.BaudRate)
+		driver = gnss.NewStmSerial(conf.DevicePath, conf.BaudRate, debug)
 	}
 
 	switch cmd := flag.Arg(0); cmd {

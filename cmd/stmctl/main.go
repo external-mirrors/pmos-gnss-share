@@ -48,10 +48,9 @@ func main() {
 
 	var stm gnss.Stm
 	if serial {
-		stm = gnss.NewStmSerial(devPath, baud)
-
+		stm = gnss.NewStmSerial(devPath, baud, debug)
 	} else {
-		stm = gnss.NewStmGnss(devPath)
+		stm = gnss.NewStmGnss(devPath, debug)
 	}
 
 	switch cmd := flag.Arg(0); cmd {
