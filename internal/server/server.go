@@ -4,11 +4,13 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/user"
 	"strconv"
+	"time"
 
 	"gitlab.com/postmarketOS/gnss-share/internal/pool"
 )
@@ -107,11 +109,27 @@ func (s *Server) clientConnection(c *pool.Client) {
 		(*c.Conn).Close()
 	}()
 
+	var tries int
+	maxTries := 5
 	for {
-		msg := <-c.Send
-		if _, err := (*c.Conn).Write(msg); err != nil {
+		if tries >= maxTries {
+			fmt.Println("Unix sock server: unable to send to client, disconnecting.")
 			break
 		}
+		msg := <-c.Send
+		(*c.Conn).SetWriteDeadline(time.Now().Add(1 * time.Second))
+		if _, err := (*c.Conn).Write(msg); err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				fmt.Printf("Unix sock server: timeout trying to send line to client, retrying (%d of %d)...\n", tries+1, maxTries)
+				tries++
+				continue
+			}
+			// client disconnected
+			break
+		}
+
+		// successful send, reset tries counter
+		tries = 0
 	}
 
 	// client disconnected
