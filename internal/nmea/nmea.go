@@ -3,37 +3,38 @@
 
 package nmea
 
-import "fmt"
+import (
+	"strconv"
+	"strings"
+)
 
-type Sentence struct {
-	Type string
-	Data []string
-}
-
-func checksum(s string) string {
-	var sum uint8
-	for i := 0; i < len(s); i++ {
-		sum ^= s[i]
+func New(sentence string, data []string) []byte {
+	// max length of NMEA sentence is 82 (according to wikipedia...)
+	buf := make([]byte, 0, 82)
+	buf = append(buf, '$')
+	buf = append(buf, []byte(sentence)...)
+	for _, d := range data {
+		buf = append(buf, ',')
+		buf = append(buf, []byte(d)...)
 	}
 
-	return fmt.Sprintf("%02X", sum)
-}
-
-func (s Sentence) String() string {
-	sentence := s.Type
-	for _, d := range s.Data {
-		sentence = fmt.Sprintf("%s,%s", sentence, d)
-	}
-
-	if len(s.Data) == 0 {
+	if len(data) == 0 {
 		// always make sure the type is followed by a comma if there is no data
-		sentence = fmt.Sprintf("%s,", sentence)
+		buf = append(buf, ',')
 	}
 
-	str := fmt.Sprintf("$%s*%s", sentence, checksum(sentence))
-	return str
+	// add checksum
+	sum := checksum(buf[1:])
+	buf = append(buf, '*')
+	buf = append(buf, sum...)
+	return buf
 }
 
-func (s Sentence) Bytes() []byte {
-	return []byte(s.String())
+func checksum(b []byte) []byte {
+	var sum uint8
+	for i := 0; i < len(b); i++ {
+		sum ^= b[i]
+	}
+
+	return []byte(strings.ToUpper(strconv.FormatInt(int64(sum), 16)))
 }

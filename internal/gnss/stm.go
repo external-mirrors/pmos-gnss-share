@@ -5,6 +5,7 @@ package gnss
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"math"
@@ -178,9 +179,9 @@ func (s *StmGnss) close() (err error) {
 	return
 }
 
-func (s *StmCommon) readline() (line string, err error) {
+func (s *StmCommon) readline() (line []byte, err error) {
 	for s.scanner.Scan() {
-		line = s.scanner.Text()
+		line = s.scanner.Bytes()
 		break
 	}
 
@@ -190,10 +191,7 @@ func (s *StmCommon) readline() (line string, err error) {
 
 func (s *StmGnss) ready() (bool, error) {
 	// device sends this message when it has booted
-	resp := nmea.Sentence{
-		Type: "GPTXT",
-		Data: []string{"DEFAULT LIV CONFIGURATION"},
-	}.String()
+	resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
 
 	tries := 100
 	c := 0
@@ -209,7 +207,7 @@ func (s *StmGnss) ready() (bool, error) {
 			err = fmt.Errorf("gnss/StmGnss.ready: %w", err)
 			return false, err
 		}
-		if strings.Contains(line, resp) {
+		if bytes.Contains(line, resp) {
 			return true, nil
 		}
 		c++
@@ -305,7 +303,7 @@ func (s *StmCommon) GetParam(cdbId int) (val uint64, err error) {
 	s.pause()
 	defer s.resume()
 
-	out, err := s.sendCmd(nmea.Sentence{Type: "PSTMGETPAR", Data: []string{fmt.Sprintf("%d", cdbId)}}.String(), true)
+	out, err := s.sendCmd(nmea.New("PSTMGETPAR", []string{fmt.Sprintf("%d", cdbId)}), true)
 	if err != nil {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
@@ -359,17 +357,15 @@ func (s *StmCommon) SetParam(cdbId int, value uint64) (err error) {
 	s.pause()
 	// resume only on error, since system is reset on success
 
-	msgListCmd := nmea.Sentence{
-		Type: "PSTMSETPAR",
-		Data: []string{
-			fmt.Sprintf("%d%d", 3, cdbId),
-			fmt.Sprintf("0x%08x", value),
-			// TODO: exposing the OR and AND functionality in the 4th optional
-			// parameter to STMSETPAR would be nice
-			fmt.Sprintf("%d", 0),
-		},
-	}
-	out, err := s.sendCmd(msgListCmd.String(), true)
+	msgListCmd := nmea.New("PSTMSETPAR", []string{
+		fmt.Sprintf("%d%d", 3, cdbId),
+		fmt.Sprintf("0x%08x", value),
+		// TODO: exposing the OR and AND functionality in the 4th optional
+		// parameter to STMSETPAR would be nice
+		fmt.Sprintf("%d", 0),
+	},
+	)
+	out, err := s.sendCmd(msgListCmd, true)
 	if err != nil {
 		err = fmt.Errorf("gnss/StmCommon.SetParam: %w", err)
 		s.resume()
@@ -383,12 +379,12 @@ func (s *StmCommon) SetParam(cdbId int, value uint64) (err error) {
 		}
 	}
 
-	_, err = s.sendCmd(nmea.Sentence{Type: "PSTMSAVEPAR"}.String(), true)
+	_, err = s.sendCmd(nmea.New("PSTMSAVEPAR", []string{}), true)
 	if err != nil {
 		s.resume()
 		return
 	}
-	_, err = s.sendCmd(nmea.Sentence{Type: "PSTMSRR"}.String(), false)
+	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), false)
 	return
 }
 
@@ -400,7 +396,7 @@ func (s *StmCommon) Reset() (err error) {
 
 	defer s.close()
 	s.pause()
-	_, err = s.sendCmd(nmea.Sentence{Type: "PSTMSRR"}.String(), false)
+	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), false)
 	return
 }
 
@@ -414,12 +410,12 @@ func (s *StmCommon) Restore() (err error) {
 	s.pause()
 	// resume only on error, since system is reset on success
 
-	_, err = s.sendCmd(nmea.Sentence{Type: "PSTMRESTOREPAR"}.String(), true)
+	_, err = s.sendCmd(nmea.New("PSTMRESTOREPAR", []string{}), true)
 	if err != nil {
 		s.resume()
 		return
 	}
-	_, err = s.sendCmd(nmea.Sentence{Type: "PSTMSRR"}.String(), false)
+	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), false)
 	return
 }
 
@@ -432,7 +428,7 @@ func (s *StmCommon) saveEphemeris(path string) (err error) {
 	}
 	defer s.resume()
 
-	out, err := s.sendCmd(nmea.Sentence{Type: "PSTMDUMPEPHEMS"}.String(), true)
+	out, err := s.sendCmd(nmea.New("PSTMDUMPEPHEMS", []string{}), true)
 	if err != nil {
 		return fmt.Errorf("gnss/StmCommon.saveEphemeris: %w", err)
 	}
@@ -461,7 +457,7 @@ func (s *StmCommon) saveAlamanac(path string) (err error) {
 	}
 	defer s.resume()
 
-	out, err := s.sendCmd(nmea.Sentence{Type: "PSTMDUMPALMANAC"}.String(), true)
+	out, err := s.sendCmd(nmea.New("PSTMDUMPALMANAC", []string{}), true)
 	if err != nil {
 		return fmt.Errorf("gnss/StmCommon.saveAlmanac: %w", err)
 	}
@@ -480,7 +476,7 @@ func (s *StmCommon) saveAlamanac(path string) (err error) {
 	return
 }
 
-func (s *StmCommon) sendCmd(cmd string, isAcked bool) (out []string, err error) {
+func (s *StmCommon) sendCmd(cmd []byte, isAcked bool) (out []string, err error) {
 	err = s.write([]byte(cmd))
 	if err != nil {
 		err = fmt.Errorf("gnss/StmCommon.sendCmd: %w", err)
@@ -493,7 +489,7 @@ func (s *StmCommon) sendCmd(cmd string, isAcked bool) (out []string, err error) 
 
 	// TODO: time out at some point..
 	c := 0
-	var line string
+	var line []byte
 	for {
 		line, err = s.readline()
 		if err != nil {
@@ -505,18 +501,18 @@ func (s *StmCommon) sendCmd(cmd string, isAcked bool) (out []string, err error) 
 		}
 
 		// Command it echo'd back when it is complete.
-		if line == cmd {
+		if bytes.Equal(line, cmd) {
 			break
 		}
 
-		out = append(out, line)
+		out = append(out, string(line))
 		c++
 	}
 	return
 }
 
 func (s *StmCommon) pause() (err error) {
-	_, err = s.sendCmd(nmea.Sentence{Type: "PSTMGPSSUSPEND"}.String(), true)
+	_, err = s.sendCmd(nmea.New("PSTMGPSSUSPEND", []string{}), true)
 	if err != nil {
 		return fmt.Errorf("gnss/StmCommon.pause: %w", err)
 	}
@@ -525,7 +521,7 @@ func (s *StmCommon) pause() (err error) {
 }
 
 func (s *StmCommon) resume() (err error) {
-	_, err = s.sendCmd(nmea.Sentence{Type: "PSTMGPSRESTART"}.String(), false)
+	_, err = s.sendCmd(nmea.New("PSTMGPSRESTART", []string{}), false)
 	if err != nil {
 		return fmt.Errorf("gnss/StmCommon.pause: %w", err)
 	}
@@ -547,7 +543,7 @@ func (s *StmCommon) write(data []byte) (err error) {
 	return
 }
 
-func (s *StmCommon) batchSendCmd(cmds []string, strict bool) (out []string, err error) {
+func (s *StmCommon) batchSendCmd(cmds [][]byte, strict bool) (out []string, err error) {
 
 	for _, c := range cmds {
 		out, err = s.sendCmd(c, true)
@@ -576,10 +572,10 @@ func (s *StmCommon) loadEphemeris(path string) (err error) {
 	}
 	defer s.resume()
 
-	var lines []string
+	var lines [][]byte
 	scanner := bufio.NewScanner(fd)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		lines = append(lines, scanner.Bytes())
 	}
 
 	_, err = s.batchSendCmd(lines, false)
@@ -604,11 +600,11 @@ func (s *StmCommon) loadAlmanac(path string) (err error) {
 	}
 	defer s.resume()
 
-	var lines []string
+	var lines [][]byte
 
 	scanner := bufio.NewScanner(fd)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		lines = append(lines, scanner.Bytes())
 	}
 
 	_, err = s.batchSendCmd(lines, false)
@@ -631,19 +627,19 @@ func (s *StmCommon) setTime() (err error) {
 			return err
 		}
 		// RMC contains both date and time from the module
-		if !strings.HasPrefix(line, "$GPRMC") {
+		if !bytes.Equal(line[:6], []byte("$GPRMC")) {
 			continue
 		}
 
-		parts := strings.Split(line, ",")
+		parts := bytes.Split(line, []byte(","))
 		if len(parts) < 10 {
 			// malformed RMC sentence
 			continue
 		}
 
 		// $GPRMC,232520.000,A,XXXXXXXX,N,YYYYYYYYYY,W,0.3,326.7,060622,,,A*76
-		rawTime = parts[1]
-		rawDate = parts[9]
+		rawTime = string(parts[1])
+		rawDate = string(parts[9])
 		break
 	}
 
@@ -662,14 +658,14 @@ func (s *StmCommon) setTime() (err error) {
 
 	fmt.Println("Module date/time is incorrect, setting to host date/time...")
 
-	_, err = s.sendCmd(nmea.Sentence{Type: "PSTMINITTIME", Data: []string{fmt.Sprintf("%02d,%02d,%04d,%02d,%02d,%02d",
+	_, err = s.sendCmd(nmea.New("PSTMINITTIME", []string{fmt.Sprintf("%02d,%02d,%04d,%02d,%02d,%02d",
 		now.Day(),
 		now.Month(),
 		now.Year(),
 		now.Hour(),
 		now.Minute(),
 		now.Second(),
-	)}}.String(), true)
+	)}), true)
 	if err != nil {
 		err = fmt.Errorf("stm/setTime: %w", err)
 		return

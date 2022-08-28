@@ -4,6 +4,7 @@
 package nmea
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -19,8 +20,8 @@ func TestChecksum(t *testing.T) {
 	}
 
 	for _, table := range tables {
-		out := checksum(table.in)
-		if out != table.expected {
+		out := checksum([]byte(table.in))
+		if !bytes.Equal(out, []byte(table.expected)) {
 			t.Errorf("%q expected: %q, got: %q", table.in, table.expected, out)
 		}
 	}
@@ -38,12 +39,9 @@ func TestStringer(t *testing.T) {
 	}
 
 	for _, table := range tables {
-		s := Sentence{
-			Type: table.inType,
-			Data: table.inData,
-		}
-		out := s.String()
-		if out != table.expected {
+		out := New(table.inType, table.inData)
+
+		if !bytes.Equal(out, []byte(table.expected)) {
 			t.Errorf("%q, %q expected: %q, got: %q", table.inType, table.inData, table.expected, out)
 		}
 	}
