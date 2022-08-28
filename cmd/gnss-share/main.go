@@ -115,7 +115,7 @@ func main() {
 
 				if err := driver.Save(conf.CachePath); err != nil {
 					// not fatal
-					fmt.Printf("error loading data: %s\n", err)
+					fmt.Printf("error storing data: %s\n", err)
 				}
 			}
 		}
