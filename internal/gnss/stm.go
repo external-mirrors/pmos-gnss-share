@@ -153,7 +153,7 @@ func (s *StmGnss) open() (err error) {
 	s.writer = s.device
 
 	if ready, err := s.ready(); !ready {
-		return fmt.Errorf("gnss/StmCommon.Start: device not ready: %s", err)
+		return fmt.Errorf("gnss/StmCommon.open: device not ready: %s", err)
 	}
 
 	s.openRefs++
@@ -197,7 +197,7 @@ func (s *StmGnss) ready() (bool, error) {
 	c := 0
 	for {
 		if c > tries {
-			return false, fmt.Errorf("gnss/StmCommon.open: timed out waiting for device")
+			return false, fmt.Errorf("gnss/StmCommon.ready: timed out waiting for device")
 		}
 
 		s.devMu.Lock()
