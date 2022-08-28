@@ -37,10 +37,10 @@ type StmCommon struct {
 	path     string
 	scanner  *bufio.Scanner
 	writer   io.Writer
-	devMu    sync.Mutex
 	refMu    sync.Mutex
 	openRefs int
 	debug    bool
+	sync.Mutex
 }
 
 // StmGnss is a STM module connected through the GNSS subsystem in the Linux
@@ -180,6 +180,8 @@ func (s *StmGnss) close() (err error) {
 }
 
 func (s *StmCommon) readline() (line []byte, err error) {
+	s.Lock()
+	defer s.Unlock()
 	for s.scanner.Scan() {
 		line = s.scanner.Bytes()
 		break
@@ -200,8 +202,6 @@ func (s *StmGnss) ready() (bool, error) {
 			return false, fmt.Errorf("gnss/StmCommon.ready: timed out waiting for device")
 		}
 
-		s.devMu.Lock()
-		defer s.devMu.Unlock()
 		line, err := s.readline()
 		if err != nil {
 			err = fmt.Errorf("gnss/StmGnss.ready: %w", err)
@@ -233,9 +233,7 @@ func (s *StmCommon) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- e
 		case <-stop:
 			return
 		default:
-			s.devMu.Lock()
 			line, err := s.readline()
-			s.devMu.Unlock()
 			if err != nil {
 				errCh <- fmt.Errorf("gnss/stm.Start: %w", err)
 				return
@@ -254,9 +252,6 @@ func (s *StmCommon) Save(dir string) (err error) {
 		return
 	}
 
-	// get a lock to prevent the Start() goroutine from intercepting responses
-	s.devMu.Lock()
-	defer s.devMu.Unlock()
 	err = s.saveEphemeris(filepath.Join(dir, "ephemeris.txt"))
 	if err != nil {
 		return
@@ -274,9 +269,6 @@ func (s *StmCommon) Load(dir string) (err error) {
 	s.open()
 	defer s.close()
 
-	// get a lock to prevent the Start() goroutine from intercepting responses
-	s.devMu.Lock()
-	defer s.devMu.Unlock()
 	err = s.loadEphemeris(filepath.Join(dir, "ephemeris.txt"))
 	if err != nil {
 		return
@@ -530,6 +522,8 @@ func (s *StmCommon) resume() (err error) {
 }
 
 func (s *StmCommon) write(data []byte) (err error) {
+	s.Lock()
+	defer s.Unlock()
 	if s.debug {
 		fmt.Printf("write: %s\n", string(data))
 	}
