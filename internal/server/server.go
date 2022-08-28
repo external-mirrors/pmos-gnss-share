@@ -84,7 +84,6 @@ func (s *Server) connectionHandler() error {
 		}
 
 		client := pool.Client{
-			Conn: &conn,
 			Send: make(chan []byte, 1),
 		}
 
@@ -95,7 +94,7 @@ func (s *Server) connectionHandler() error {
 
 		s.connPool.Register <- &client
 
-		go s.clientConnection(&client)
+		go s.clientConnection(&client, &conn)
 
 		fmt.Println("New client connected")
 
@@ -103,10 +102,10 @@ func (s *Server) connectionHandler() error {
 }
 
 // Routine run for each client connection
-func (s *Server) clientConnection(c *pool.Client) {
+func (s *Server) clientConnection(c *pool.Client, conn *net.Conn) {
 	defer func() {
 		s.connPool.Unregister <- c
-		(*c.Conn).Close()
+		(*conn).Close()
 	}()
 
 	var tries int
@@ -117,8 +116,8 @@ func (s *Server) clientConnection(c *pool.Client) {
 			break
 		}
 		msg := <-c.Send
-		(*c.Conn).SetWriteDeadline(time.Now().Add(1 * time.Second))
-		if _, err := (*c.Conn).Write(msg); err != nil {
+		(*conn).SetWriteDeadline(time.Now().Add(1 * time.Second))
+		if _, err := (*conn).Write(msg); err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				fmt.Printf("Unix sock server: timeout trying to send line to client, retrying (%d of %d)...\n", tries+1, maxTries)
 				tries++
