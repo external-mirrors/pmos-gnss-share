@@ -42,7 +42,6 @@ func (p *Pool) Start() {
 			delete(p.Clients, c)
 			p.Unlock()
 		case msg := <-p.Broadcast:
-			msg = append(msg, byte('\n'))
 			p.Lock()
 			for c := range p.Clients {
 				select {
