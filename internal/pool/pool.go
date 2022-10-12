@@ -42,8 +42,12 @@ func (p *Pool) Start() {
 		case msg := <-p.Broadcast:
 			p.Lock()
 			for c := range p.Clients {
+				// make a copy to send to each client, since Go would normally
+				// send the same ref and cause race-y problems
+				msg_copy := make([]byte, len(msg))
+				copy(msg_copy, msg)
 				select {
-				case c.Send <- msg:
+				case c.Send <- msg_copy:
 				default:
 					// don't deadlock if a client isn't receiving for some reason
 				}
