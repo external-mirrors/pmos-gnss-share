@@ -35,7 +35,7 @@ type Stm interface {
 type StmCommon struct {
 	Stm
 	path     string
-	reader   *bufio.Reader
+	scanner  *bufio.Scanner
 	writer   io.Writer
 	devMu    sync.Mutex
 	refMu    sync.Mutex
@@ -88,7 +88,7 @@ func (s *StmSerial) open() (err error) {
 		err = fmt.Errorf("gnss/StmSerial.Open(): %w", err)
 		return
 	}
-	s.reader = bufio.NewReader(s.serPort)
+	s.scanner = bufio.NewScanner(s.serPort)
 	s.writer = s.serPort
 
 	return
@@ -149,7 +149,7 @@ func (s *StmGnss) open() (err error) {
 	}
 	s.device = os.NewFile(uintptr(fd), s.path)
 
-	s.reader = bufio.NewReader(s.device)
+	s.scanner = bufio.NewScanner(s.device)
 	s.writer = s.device
 
 	if ready, err := s.ready(); !ready {
@@ -180,7 +180,13 @@ func (s *StmGnss) close() (err error) {
 }
 
 func (s *StmCommon) readline() (line []byte, err error) {
-	return s.reader.ReadBytes('\n')
+	for s.scanner.Scan() {
+		line = s.scanner.Bytes()
+		break
+	}
+
+	err = s.scanner.Err()
+	return
 }
 
 func (s *StmGnss) ready() (bool, error) {
