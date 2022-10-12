@@ -117,7 +117,7 @@ func (s *Server) clientConnection(c *pool.Client, conn *net.Conn) {
 		}
 		msg := <-c.Send
 		(*conn).SetWriteDeadline(time.Now().Add(1 * time.Second))
-		if _, err := (*conn).Write(msg); err != nil {
+		if _, err := (*conn).Write(append(msg, byte('\n'))); err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				fmt.Printf("Unix sock server: timeout trying to send line to client, retrying (%d of %d)...\n", tries+1, maxTries)
 				tries++
