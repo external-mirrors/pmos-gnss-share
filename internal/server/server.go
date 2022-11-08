@@ -132,7 +132,7 @@ func (s *Server) clientConnection(c *pool.Client, conn *net.Conn) {
 	}
 
 	// client disconnected
-	fmt.Println("Client disconnected")
+	fmt.Printf("Client disconnected (%d remaining)\n", s.connPool.Count()-1)
 	if s.connPool.Count() == 1 {
 		// client is last one in the pool
 		fmt.Println("No clients connected, closing GNSS")
