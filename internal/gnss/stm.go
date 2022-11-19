@@ -118,6 +118,10 @@ func (s *StmSerial) open() (err error) {
 	s.scanner = bufio.NewScanner(s.serPort)
 	s.writer = s.serPort
 
+	// Send the command to resume just in case the module is in a suspended
+	// state
+	s.resume()
+
 	return
 }
 
