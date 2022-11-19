@@ -568,7 +568,7 @@ func (s *StmCommon) saveEphemeris(path string) (err error) {
 
 	for _, l := range out {
 		if strings.HasPrefix(l, "$PSTMEPHEM,") {
-			fd.Write([]byte(fmt.Sprintf("%s\n", l)))
+			fmt.Fprintf(fd, "%s\n", l)
 		}
 	}
 	return
@@ -596,7 +596,7 @@ func (s *StmCommon) saveAlamanac(path string) (err error) {
 
 	for _, l := range out {
 		if strings.HasPrefix(l, "$PSTMALMANAC,") {
-			fd.Write([]byte(fmt.Sprintf("%s\n", l)))
+			fmt.Fprintf(fd, "%s\n", l)
 		}
 	}
 	return
