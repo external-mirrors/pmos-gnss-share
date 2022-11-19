@@ -35,12 +35,14 @@ type Stm interface {
 
 type StmCommon struct {
 	Stm
-	path     string
-	scanner  *bufio.Scanner
-	writer   io.Writer
-	debug    bool
-	ref      reference
+	path   string
+	writer io.Writer
+	ref    reference
+	debug  bool
 	sync.Mutex
+
+	stopScan   chan struct{}
+	readerPool *pool.Pool
 }
 
 // StmGnss is a STM module connected through the GNSS subsystem in the Linux
@@ -96,11 +98,15 @@ func NewStmSerial(path string, baud int, debug bool) *StmSerial {
 			Baud: baud,
 		},
 		StmCommon: StmCommon{
-			path:  path,
-			debug: debug,
+			path:       path,
+			debug:      debug,
+			stopScan:   nil,
+			readerPool: pool.New(),
 		},
 	}
 	s.StmCommon.Stm = &s
+	go s.readerPool.Start()
+	// TODO: add a stop method for Pool?
 
 	return &s
 }
@@ -116,13 +122,14 @@ func (s *StmSerial) open() (err error) {
 		err = fmt.Errorf("gnss/StmSerial.Open(): %w", err)
 		return
 	}
-	s.scanner = bufio.NewScanner(s.serPort)
 	s.writer = s.serPort
 	s.Unlock()
 
 	// Send the command to resume just in case the module is in a suspended
 	// state
 	s.resume()
+
+	s.stopScan = s.startScan(s.serPort)
 
 	return
 }
@@ -136,6 +143,11 @@ func (s *StmSerial) close() (err error) {
 
 	s.Lock()
 	defer s.Unlock()
+	if s.stopScan != nil {
+		close(s.stopScan)
+		s.stopScan = nil
+	}
+
 	err = s.serPort.Close()
 	if err != nil {
 		err = fmt.Errorf("gnss/StmSerial.Close: %w", err)
@@ -180,7 +192,6 @@ func (s *StmGnss) open() (err error) {
 	s.Lock()
 	s.device = os.NewFile(uintptr(fd), s.path)
 
-	s.scanner = bufio.NewScanner(s.device)
 	s.writer = s.device
 	s.Unlock()
 
@@ -188,6 +199,7 @@ func (s *StmGnss) open() (err error) {
 		return fmt.Errorf("gnss/StmCommon.open: device not ready: %s", err)
 	}
 
+	s.stopScan = s.startScan(s.device)
 
 	return
 }
@@ -197,6 +209,11 @@ func (s *StmGnss) close() (err error) {
 
 	if s.ref.Count() >= 1 {
 		return
+	}
+
+	if s.stopScan != nil {
+		close(s.stopScan)
+		s.stopScan = nil
 	}
 
 	s.Lock()
@@ -210,15 +227,75 @@ func (s *StmGnss) close() (err error) {
 	return
 }
 
-func (s *StmCommon) readline() (line []byte, err error) {
-	s.Lock()
-	defer s.Unlock()
-	for s.scanner.Scan() {
-		line = s.scanner.Bytes()
-		break
-	}
+func (s *StmCommon) readlines(device io.Reader) (sendCh chan []byte, errCh chan error, stopCh chan struct{}) {
+	stopCh = make(chan struct{})
+	sendCh = make(chan []byte)
+	errCh = make(chan error)
 
-	err = s.scanner.Err()
+	go func() {
+		var line []byte
+
+		defer close(sendCh)
+		defer close(errCh)
+
+		scanner := bufio.NewScanner(device)
+
+		for {
+			select {
+			case <-stopCh:
+				return
+			default:
+				scanner.Scan()
+				line = bytes.TrimSpace(scanner.Bytes())
+				err := scanner.Err()
+				if err != nil {
+					fmt.Println(err)
+					// don't block on sending errors
+					select {
+					case errCh <- err:
+					default:
+					}
+					return
+				}
+
+				if len(line) == 0 {
+					return
+				}
+
+				select {
+				case sendCh <- line:
+				default:
+				}
+			}
+		}
+	}()
+
+	return
+}
+
+func (s *StmCommon) startScan(device io.Reader) (stopScan chan struct{}) {
+	recvCh, errCh, stopReadlinesCh := s.readlines(device)
+	stopScan = make(chan struct{})
+
+	go func() {
+		defer close(stopReadlinesCh)
+
+		for {
+			select {
+			case <-stopScan:
+				// TODO:
+				return
+			case line := <-recvCh:
+				// TODO: this could be blocking?
+				s.readerPool.Broadcast <- line
+			case err := <-errCh:
+				if err != nil {
+					fmt.Printf("ERROR: startScan: %s\n", err)
+				}
+			}
+		}
+	}()
+
 	return
 }
 
@@ -257,50 +334,44 @@ func (s *StmGnss) ready() (bool, error) {
 	// device sends this message when it has booted
 	resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
 
-	tries := 100
-	c := 0
+	r, err := NewReader(s.readerPool, s.open, s.close)
+	if err != nil {
+		return false, err
+	}
+	defer r.Close()
+
+	timeout := time.After(5 * time.Second)
 	for {
-		if c > tries {
+		select {
+		case line := <-r.Read:
+			if bytes.Contains(line, resp) {
+				return true, nil
+			}
+		case <-timeout:
 			return false, fmt.Errorf("gnss/StmCommon.ready: timed out waiting for device")
 		}
-
-		line, err := s.readline()
-		if err != nil {
-			err = fmt.Errorf("gnss/StmGnss.ready: %w", err)
-			return false, err
-		}
-		if bytes.Contains(line, resp) {
-			return true, nil
-		}
-		c++
 	}
 }
 
 func (s *StmCommon) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- error) {
-	err := s.open()
-	if err != nil {
-		errCh <- fmt.Errorf("gnss/stm.Start: %w", err)
-		return
-	}
-	defer s.close()
-
 	// TODO: allow disabling this in config:
 	if err := s.setTime(); err != nil {
 		errCh <- fmt.Errorf("gnss/stm.Start: %w", err)
 		return
 	}
 
+	r, err := NewReader(s.readerPool, s.open, s.close)
+	if err != nil {
+		errCh <- err
+	}
+	defer r.Close()
+
 	for {
 		select {
 		case <-stop:
 			return
-		default:
-			line, err := s.readline()
-			if err != nil {
-				errCh <- fmt.Errorf("gnss/stm.Start: %w", err)
-				return
-			}
-			sendCh <- []byte(line)
+		case line := <-r.Read:
+			sendCh <- line
 		}
 	}
 }
@@ -531,6 +602,13 @@ func (s *StmCommon) saveAlamanac(path string) (err error) {
 }
 
 func (s *StmCommon) sendCmd(cmd []byte, isAcked bool) (out []string, err error) {
+	r, err := NewReader(s.readerPool, s.open, s.close)
+	if err != nil {
+		return out, err
+	}
+	defer r.Close()
+	cmd = bytes.TrimSpace(cmd)
+	fmt.Println("sendCmd: writing: ", string(cmd))
 	err = s.write([]byte(cmd))
 	if err != nil {
 		err = fmt.Errorf("gnss/StmCommon.sendCmd: %w", err)
@@ -541,27 +619,29 @@ func (s *StmCommon) sendCmd(cmd []byte, isAcked bool) (out []string, err error) 
 		return
 	}
 
-	// TODO: time out at some point..
-	c := 0
-	var line []byte
+	// Note: timeout has to be high enough that some commands (e.g. reading
+	// ephemeris and almanac) don't time out... Hard-coding this is somewhat
+	// hacky... but it's unlikely(?) that a real comand would take more than 30
+	// seconds to finish
+	timeout := time.After(30 * time.Second)
+
+timeout_loop:
 	for {
-		line, err = s.readline()
-		if err != nil {
-			err = fmt.Errorf("gnss/StmCommon.sendCmd: %w", err)
-			return
+		select {
+		case line := <-r.Read:
+			if s.debug {
+				fmt.Printf("read: %s\n", line)
+			}
+			// Command it echo'd back when it is complete.
+			if bytes.Equal(line, cmd) {
+				break timeout_loop
+			}
+			out = append(out, string(line))
+		case <-timeout:
+			return out, fmt.Errorf("gnss/StmCommon.sendCmd: timed out waiting for device")
 		}
-		if s.debug {
-			fmt.Printf("read: %s\n", line)
-		}
-
-		// Command it echo'd back when it is complete.
-		if bytes.Equal(line, cmd) {
-			break
-		}
-
-		out = append(out, string(line))
-		c++
 	}
+
 	return
 }
 
@@ -676,27 +756,36 @@ func (s *StmCommon) setTime() (err error) {
 	fmt.Println("Checking date/time on module...")
 	var rawTime, rawDate string
 
+	r, err := NewReader(s.readerPool, s.open, s.close)
+	if err != nil {
+		return
+	}
+	defer r.Close()
+	timeout := time.After(5 * time.Second)
+
+get_time_loop:
 	for {
-		line, err := s.readline()
-		if err != nil {
-			err = fmt.Errorf("stm/setTime: %w", err)
-			return err
-		}
-		// RMC contains both date and time from the module
-		if !bytes.Equal(line[:6], []byte("$GPRMC")) {
-			continue
-		}
+		select {
+		case line := <-r.Read:
+			fmt.Println("settime line: ", string(line))
+			// RMC contains both date and time from the module
+			if len(line) > 7 && !bytes.Equal(line[:6], []byte("$GPRMC")) {
+				continue
+			}
 
-		parts := bytes.Split(line, []byte(","))
-		if len(parts) < 10 {
-			// malformed RMC sentence
-			continue
-		}
+			parts := bytes.Split(line, []byte(","))
+			if len(parts) < 10 {
+				// malformed RMC sentence
+				continue
+			}
 
-		// $GPRMC,232520.000,A,XXXXXXXX,N,YYYYYYYYYY,W,0.3,326.7,060622,,,A*76
-		rawTime = string(parts[1])
-		rawDate = string(parts[9])
-		break
+			// $GPRMC,232520.000,A,XXXXXXXX,N,YYYYYYYYYY,W,0.3,326.7,060622,,,A*76
+			rawTime = string(parts[1])
+			rawDate = string(parts[9])
+			break get_time_loop
+		case <-timeout:
+			return fmt.Errorf("stm/setTime: timed out waiting for device")
+		}
 	}
 
 	moduleTime, err := time.Parse("020106150405", rawDate+rawTime)
