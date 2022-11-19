@@ -613,7 +613,9 @@ func (s *StmCommon) sendCmd(cmd []byte, ackResponse []byte) (out []string, err e
 	}
 	defer r.Close()
 	cmd = bytes.TrimSpace(cmd)
-	fmt.Println("sendCmd: writing: ", string(cmd))
+	if s.debug {
+		fmt.Println("sendCmd: writing: ", string(cmd))
+	}
 	err = s.write([]byte(cmd))
 	if err != nil {
 		err = fmt.Errorf("gnss/StmCommon.sendCmd: %w", err)
