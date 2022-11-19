@@ -110,6 +110,7 @@ func (s *StmSerial) open() (err error) {
 	if s.ref.Count() > 1 {
 		return
 	}
+	s.Lock()
 	s.serPort, err = serial.OpenPort(&s.serConf)
 	if err != nil {
 		err = fmt.Errorf("gnss/StmSerial.Open(): %w", err)
@@ -117,6 +118,7 @@ func (s *StmSerial) open() (err error) {
 	}
 	s.scanner = bufio.NewScanner(s.serPort)
 	s.writer = s.serPort
+	s.Unlock()
 
 	// Send the command to resume just in case the module is in a suspended
 	// state
@@ -132,6 +134,8 @@ func (s *StmSerial) close() (err error) {
 		return
 	}
 
+	s.Lock()
+	defer s.Unlock()
 	err = s.serPort.Close()
 	if err != nil {
 		err = fmt.Errorf("gnss/StmSerial.Close: %w", err)
@@ -173,10 +177,12 @@ func (s *StmGnss) open() (err error) {
 		err = fmt.Errorf("gnss/Stm.Open(): %w", err)
 		return
 	}
+	s.Lock()
 	s.device = os.NewFile(uintptr(fd), s.path)
 
 	s.scanner = bufio.NewScanner(s.device)
 	s.writer = s.device
+	s.Unlock()
 
 	if ready, err := s.ready(); !ready {
 		return fmt.Errorf("gnss/StmCommon.open: device not ready: %s", err)
@@ -193,6 +199,8 @@ func (s *StmGnss) close() (err error) {
 		return
 	}
 
+	s.Lock()
+	defer s.Unlock()
 	err = s.device.Close()
 	if err != nil {
 		err = fmt.Errorf("gnss/Stm.Close: %w", err)
@@ -576,8 +584,6 @@ func (s *StmCommon) resume() (err error) {
 }
 
 func (s *StmCommon) write(data []byte) (err error) {
-	s.Lock()
-	defer s.Unlock()
 	if s.debug {
 		fmt.Printf("write: %s\n", string(data))
 	}
