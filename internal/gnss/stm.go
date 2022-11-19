@@ -104,7 +104,7 @@ func NewStmSerial(path string, baud int, debug bool) *StmSerial {
 			readerPool: pool.New(),
 		},
 	}
-	s.StmCommon.Stm = &s
+	s.Stm = &s
 	go s.readerPool.Start()
 	// TODO: add a stop method for Pool?
 
@@ -169,7 +169,7 @@ func NewStmGnss(path string, debug bool) *StmGnss {
 			debug: debug,
 		},
 	}
-	s.StmCommon.Stm = &s
+	s.Stm = &s
 
 	return &s
 }
