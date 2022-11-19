@@ -767,7 +767,6 @@ get_time_loop:
 	for {
 		select {
 		case line := <-r.Read:
-			fmt.Println("settime line: ", string(line))
 			// RMC contains both date and time from the module
 			if len(line) > 7 && !bytes.Equal(line[:6], []byte("$GPRMC")) {
 				continue
