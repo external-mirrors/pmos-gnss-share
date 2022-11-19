@@ -569,7 +569,7 @@ func (s *StmCommon) loadEphemeris(path string) (err error) {
 	var lines [][]byte
 	scanner := bufio.NewScanner(fd)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Bytes())
+		lines = append(lines, append([]byte(nil), line...))
 	}
 
 	_, err = s.batchSendCmd(lines, false)
@@ -598,7 +598,7 @@ func (s *StmCommon) loadAlmanac(path string) (err error) {
 
 	scanner := bufio.NewScanner(fd)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Bytes())
+		lines = append(lines, append([]byte(nil), line...))
 	}
 
 	_, err = s.batchSendCmd(lines, false)
