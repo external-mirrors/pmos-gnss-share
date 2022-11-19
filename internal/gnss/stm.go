@@ -249,7 +249,6 @@ func (s *StmCommon) readlines(device io.Reader) (sendCh chan []byte, errCh chan 
 				line = bytes.TrimSpace(scanner.Bytes())
 				err := scanner.Err()
 				if err != nil {
-					fmt.Println(err)
 					// don't block on sending errors
 					select {
 					case errCh <- err:
