@@ -677,21 +677,6 @@ func (s *StmCommon) write(data []byte) (err error) {
 	return
 }
 
-func (s *StmCommon) batchSendCmd(cmds [][]byte, strict bool) (out []string, err error) {
-
-	for _, c := range cmds {
-		out, err = s.sendCmd(c, true)
-		if err != nil {
-			err = fmt.Errorf("gnss/StmCommon.batchSendCmd: %s", err)
-			if strict {
-				return
-			}
-			fmt.Println(err)
-		}
-	}
-	return
-}
-
 func (s *StmCommon) loadEphemeris(path string) (err error) {
 	fd, err := os.Open(path)
 	if err != nil {
@@ -713,9 +698,11 @@ func (s *StmCommon) loadEphemeris(path string) (err error) {
 		lines = append(lines, append([]byte(nil), line...))
 	}
 
-	_, err = s.batchSendCmd(lines, false)
-	if err != nil {
-		return fmt.Errorf("gnss/StmCommon.loadEphemeris: %w", err)
+	for _, line := range lines {
+		_, err = s.sendCmd(line, true)
+		if err != nil {
+			return fmt.Errorf("gnss/StmCommon.loadEphemeris: %w", err)
+		}
 	}
 
 	return
@@ -743,9 +730,11 @@ func (s *StmCommon) loadAlmanac(path string) (err error) {
 		lines = append(lines, append([]byte(nil), line...))
 	}
 
-	_, err = s.batchSendCmd(lines, false)
-	if err != nil {
-		return fmt.Errorf("gnss/StmCommon.loadAlmanac: %w", err)
+	for _, line := range lines {
+		_, err = s.sendCmd(line, true)
+		if err != nil {
+			return fmt.Errorf("gnss/StmCommon.loadAlmanac: %w", err)
+		}
 	}
 
 	return
