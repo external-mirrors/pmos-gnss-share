@@ -38,8 +38,6 @@ type StmCommon struct {
 	path     string
 	scanner  *bufio.Scanner
 	writer   io.Writer
-	refMu    sync.Mutex
-	openRefs int
 	debug    bool
 	ref      reference
 	sync.Mutex
@@ -108,11 +106,8 @@ func NewStmSerial(path string, baud int, debug bool) *StmSerial {
 }
 
 func (s *StmSerial) open() (err error) {
-	s.refMu.Lock()
-	defer s.refMu.Unlock()
-
-	s.openRefs++
-	if s.openRefs > 1 {
+	s.ref.Add()
+	if s.ref.Count() > 1 {
 		return
 	}
 	s.serPort, err = serial.OpenPort(&s.serConf)
@@ -127,11 +122,9 @@ func (s *StmSerial) open() (err error) {
 }
 
 func (s *StmSerial) close() (err error) {
-	s.refMu.Lock()
-	defer s.refMu.Unlock()
+	s.ref.Remove()
 
-	s.openRefs--
-	if s.openRefs >= 1 {
+	if s.ref.Count() >= 1 {
 		return
 	}
 
@@ -162,11 +155,8 @@ func NewStmGnss(path string, debug bool) *StmGnss {
 }
 
 func (s *StmGnss) open() (err error) {
-	s.refMu.Lock()
-	defer s.refMu.Unlock()
-
-	if s.openRefs > 0 {
-		s.openRefs++
+	s.ref.Add()
+	if s.ref.Count() > 1 {
 		return
 	}
 	// Using syscall.Open will open the file in non-pollable mode, which
@@ -188,16 +178,14 @@ func (s *StmGnss) open() (err error) {
 		return fmt.Errorf("gnss/StmCommon.open: device not ready: %s", err)
 	}
 
-	s.openRefs++
 
 	return
 }
 
 func (s *StmGnss) close() (err error) {
-	s.refMu.Lock()
-	defer s.refMu.Unlock()
+	s.ref.Remove()
 
-	if s.openRefs > 1 {
+	if s.ref.Count() >= 1 {
 		return
 	}
 
@@ -206,7 +194,6 @@ func (s *StmGnss) close() (err error) {
 		err = fmt.Errorf("gnss/Stm.Close: %w", err)
 	}
 	s.device = nil
-	s.openRefs = 0
 
 	return
 }
