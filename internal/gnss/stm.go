@@ -40,6 +40,7 @@ type StmCommon struct {
 	refMu    sync.Mutex
 	openRefs int
 	debug    bool
+	ref      reference
 	sync.Mutex
 }
 
@@ -57,6 +58,36 @@ type StmSerial struct {
 	StmCommon
 	serConf serial.Config
 	serPort *serial.Port
+}
+
+type reference struct {
+	sync.Mutex
+	count int
+}
+
+func (r *reference) Add() {
+	r.Lock()
+	defer r.Unlock()
+
+	r.count += 1
+}
+
+func (r *reference) Remove() {
+	r.Lock()
+	defer r.Unlock()
+
+	if r.count < 1 {
+		return
+	}
+
+	r.count -= 1
+}
+
+func (r *reference) Count() int {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.count
 }
 
 func NewStmSerial(path string, baud int, debug bool) *StmSerial {
