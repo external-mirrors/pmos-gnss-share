@@ -428,7 +428,8 @@ func (s *StmCommon) GetParam(cdbId int) (val uint64, err error) {
 	s.pause()
 	defer s.resume()
 
-	out, err := s.sendCmd(nmea.New("PSTMGETPAR", []string{fmt.Sprintf("%d", cdbId)}), true)
+	// the module responds with STMSETPAR to a GETPAR command
+	out, err := s.sendCmd(nmea.New("PSTMGETPAR", []string{fmt.Sprintf("%d", cdbId)}), []byte("SETPAR"))
 	if err != nil {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
@@ -490,7 +491,7 @@ func (s *StmCommon) SetParam(cdbId int, value uint64) (err error) {
 		fmt.Sprintf("%d", 0),
 	},
 	)
-	out, err := s.sendCmd(msgListCmd, true)
+	out, err := s.sendCmd(msgListCmd, []byte("SETPAROK"))
 	if err != nil {
 		err = fmt.Errorf("gnss/StmCommon.SetParam: %w", err)
 		s.resume()
@@ -504,12 +505,12 @@ func (s *StmCommon) SetParam(cdbId int, value uint64) (err error) {
 		}
 	}
 
-	_, err = s.sendCmd(nmea.New("PSTMSAVEPAR", []string{}), true)
+	_, err = s.sendCmd(nmea.New("PSTMSAVEPAR", []string{}), []byte("SAVEPAROK"))
 	if err != nil {
 		s.resume()
 		return
 	}
-	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), false)
+	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), nil)
 	return
 }
 
@@ -521,7 +522,7 @@ func (s *StmCommon) Reset() (err error) {
 
 	defer s.close()
 	s.pause()
-	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), false)
+	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), nil)
 	return
 }
 
@@ -535,12 +536,12 @@ func (s *StmCommon) Restore() (err error) {
 	s.pause()
 	// resume only on error, since system is reset on success
 
-	_, err = s.sendCmd(nmea.New("PSTMRESTOREPAR", []string{}), true)
+	_, err = s.sendCmd(nmea.New("PSTMRESTOREPAR", []string{}), []byte("RESTOREPAROK"))
 	if err != nil {
 		s.resume()
 		return
 	}
-	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), false)
+	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), nil)
 	return
 }
 
@@ -553,7 +554,7 @@ func (s *StmCommon) saveEphemeris(path string) (err error) {
 	}
 	defer s.resume()
 
-	out, err := s.sendCmd(nmea.New("PSTMDUMPEPHEMS", []string{}), true)
+	out, err := s.sendCmd(nmea.New("PSTMDUMPEPHEMS", []string{}), []byte("DUMPEPHEMS"))
 	if err != nil {
 		return fmt.Errorf("gnss/StmCommon.saveEphemeris: %w", err)
 	}
@@ -582,7 +583,7 @@ func (s *StmCommon) saveAlamanac(path string) (err error) {
 	}
 	defer s.resume()
 
-	out, err := s.sendCmd(nmea.New("PSTMDUMPALMANAC", []string{}), true)
+	out, err := s.sendCmd(nmea.New("PSTMDUMPALMANAC", []string{}), []byte("DUMPALMANAC"))
 	if err != nil {
 		return fmt.Errorf("gnss/StmCommon.saveAlmanac: %w", err)
 	}
@@ -601,7 +602,11 @@ func (s *StmCommon) saveAlamanac(path string) (err error) {
 	return
 }
 
-func (s *StmCommon) sendCmd(cmd []byte, isAcked bool) (out []string, err error) {
+// Send the given command to the module. It attempts to get confirmation by
+// comparing ackResponse to the data it receives from the module (if
+// ackResponse is not empty). An error is returned if ackResponse is not empty
+// and it fails to find a match before it times out.
+func (s *StmCommon) sendCmd(cmd []byte, ackResponse []byte) (out []string, err error) {
 	r, err := NewReader(s.readerPool, s.open, s.close)
 	if err != nil {
 		return out, err
@@ -615,7 +620,7 @@ func (s *StmCommon) sendCmd(cmd []byte, isAcked bool) (out []string, err error) 
 		return
 	}
 
-	if !isAcked {
+	if len(ackResponse) == 0 {
 		return
 	}
 
@@ -633,7 +638,7 @@ timeout_loop:
 				fmt.Printf("read: %s\n", line)
 			}
 			// Command it echo'd back when it is complete.
-			if bytes.Equal(line, cmd) {
+			if bytes.Contains(line, ackResponse) {
 				break timeout_loop
 			}
 			out = append(out, string(line))
@@ -646,7 +651,7 @@ timeout_loop:
 }
 
 func (s *StmCommon) pause() (err error) {
-	_, err = s.sendCmd(nmea.New("PSTMGPSSUSPEND", []string{}), true)
+	_, err = s.sendCmd(nmea.New("PSTMGPSSUSPEND", []string{}), nil)
 	if err != nil {
 		return fmt.Errorf("gnss/StmCommon.pause: %w", err)
 	}
@@ -655,7 +660,7 @@ func (s *StmCommon) pause() (err error) {
 }
 
 func (s *StmCommon) resume() (err error) {
-	_, err = s.sendCmd(nmea.New("PSTMGPSRESTART", []string{}), false)
+	_, err = s.sendCmd(nmea.New("PSTMGPSRESTART", []string{}), nil)
 	if err != nil {
 		return fmt.Errorf("gnss/StmCommon.pause: %w", err)
 	}
@@ -699,7 +704,7 @@ func (s *StmCommon) loadEphemeris(path string) (err error) {
 	}
 
 	for _, line := range lines {
-		_, err = s.sendCmd(line, true)
+		_, err = s.sendCmd(line, []byte("EPHEMOK"))
 		if err != nil {
 			return fmt.Errorf("gnss/StmCommon.loadEphemeris: %w", err)
 		}
@@ -731,7 +736,7 @@ func (s *StmCommon) loadAlmanac(path string) (err error) {
 	}
 
 	for _, line := range lines {
-		_, err = s.sendCmd(line, true)
+		_, err = s.sendCmd(line, []byte("ALMANACOK"))
 		if err != nil {
 			return fmt.Errorf("gnss/StmCommon.loadAlmanac: %w", err)
 		}
@@ -798,7 +803,7 @@ get_time_loop:
 		now.Hour(),
 		now.Minute(),
 		now.Second(),
-	)}), true)
+	)}), []byte("INITTIME"))
 	if err != nil {
 		err = fmt.Errorf("stm/setTime: %w", err)
 		return
