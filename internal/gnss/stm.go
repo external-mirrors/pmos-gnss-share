@@ -20,6 +20,7 @@ import (
 
 	"github.com/tarm/serial"
 	"gitlab.com/postmarketOS/gnss-share/internal/nmea"
+	"gitlab.com/postmarketOS/gnss-share/internal/pool"
 )
 
 type Stm interface {
@@ -220,6 +221,37 @@ func (s *StmCommon) readline() (line []byte, err error) {
 
 	err = s.scanner.Err()
 	return
+}
+
+type reader struct {
+	Read chan []byte
+
+	poolClient *pool.Client
+	pool       *pool.Pool
+
+	// called when reader is closed
+	close func() error
+}
+
+func NewReader(p *pool.Pool, open func() error, close func() error) (*reader, error) {
+	if err := open(); err != nil {
+		return nil, err
+	}
+
+	r := make(chan []byte, 1)
+	poolClient := &pool.Client{Send: r}
+	p.Register <- poolClient
+	return &reader{
+		Read:       r,
+		poolClient: poolClient,
+		close:      close,
+		pool:       p,
+	}, nil
+}
+
+func (r *reader) Close() error {
+	r.pool.Unregister <- r.poolClient
+	return r.close()
 }
 
 func (s *StmGnss) ready() (bool, error) {
