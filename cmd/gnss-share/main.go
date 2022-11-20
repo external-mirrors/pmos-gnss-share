@@ -123,8 +123,21 @@ func main() {
 
 	s := server.New(conf.Socket, conf.OwnerGroup, startChan, stopChan, connPool)
 
+	quitChan := make(chan struct{})
+	defer close(quitChan)
+	// Start monitoring for errors
+	go func() {
+		for {
+			select {
+			case <-quitChan:
+				return
+			case err := <-errChan:
+				fmt.Println(err)
+			}
+		}
+	}()
+
 	if err := s.Start(); err != nil {
 		log.Fatal(err)
 	}
-
 }
