@@ -198,9 +198,11 @@ func (s *StmGnss) open() (err error) {
 	s.writer = s.device
 	s.Unlock()
 
-	if ready, err := s.ready(); !ready {
-		return fmt.Errorf("gnss/StmCommon.open: device not ready: %s", err)
-	}
+	// TODO: 3 seconds should be more than enough time for the module to boot.
+	// This is a total hack... but it's simpler than implementing a routine to
+	// read data from the module and look for the response that indicates it
+	// has booted. Obviously this is far from ideal though...........
+	time.Sleep(3 * time.Second)
 
 	s.stopScan = s.startScan(s.device)
 
