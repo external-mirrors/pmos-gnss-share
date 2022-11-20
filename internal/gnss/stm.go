@@ -165,11 +165,14 @@ func (s *StmSerial) ready() (bool, error) {
 func NewStmGnss(path string, debug bool) *StmGnss {
 	s := StmGnss{
 		StmCommon: StmCommon{
-			path:  path,
-			debug: debug,
+			path:       path,
+			debug:      debug,
+			stopScan:   nil,
+			readerPool: pool.New(),
 		},
 	}
 	s.Stm = &s
+	go s.readerPool.Start()
 
 	return &s
 }
