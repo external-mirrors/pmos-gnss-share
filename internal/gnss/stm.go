@@ -267,7 +267,7 @@ func (s *StmCommon) readlines(device io.Reader) (sendCh chan []byte, errCh chan 
 				}
 
 				select {
-				case sendCh <- line:
+				case sendCh <- append([]byte{}, line...):
 				default:
 				}
 			}
