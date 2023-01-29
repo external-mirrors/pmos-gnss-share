@@ -1,4 +1,4 @@
-// Copyright 2021 Clayton Craft <clayton@craftyguy.net>
+// Copyright 2023 Clayton Craft <clayton@craftyguy.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 package main
@@ -82,8 +82,11 @@ func main() {
 		// server mode
 	}
 
+	quitChan := make(chan struct{})
+	defer close(quitChan)
+
 	// connection broadcast pool
-	connPool := pool.New()
+	connPool := pool.New(quitChan)
 	go connPool.Start()
 
 	// channels for starting/stopping the driver
@@ -123,8 +126,6 @@ func main() {
 
 	s := server.New(conf.Socket, conf.OwnerGroup, startChan, stopChan, connPool)
 
-	quitChan := make(chan struct{})
-	defer close(quitChan)
 	// Start monitoring for errors
 	go func() {
 		for {

@@ -1,4 +1,4 @@
-// Copyright 2022 Clayton Craft <clayton@craftyguy.net>
+// Copyright 2023 Clayton Craft <clayton@craftyguy.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 package pool
@@ -17,14 +17,16 @@ type Pool struct {
 	Clients    map[*Client]bool
 	Broadcast  chan []byte
 	sync.Mutex
+	stopChan <-chan struct{}
 }
 
-func New() *Pool {
+func New(stopChan <-chan struct{}) (p *Pool) {
 	return &Pool{
 		Register:   make(chan *Client),
 		Unregister: make(chan *Client),
 		Clients:    make(map[*Client]bool),
 		Broadcast:  make(chan []byte),
+		stopChan:   stopChan,
 	}
 }
 
@@ -53,6 +55,8 @@ func (p *Pool) Start() {
 				}
 			}
 			p.Unlock()
+		case <-p.stopChan:
+			return
 		}
 	}
 }

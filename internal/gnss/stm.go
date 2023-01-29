@@ -1,4 +1,4 @@
-// Copyright 2022 Clayton Craft <clayton@craftyguy.net>
+// Copyright 2023 Clayton Craft <clayton@craftyguy.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 package gnss
@@ -99,13 +99,13 @@ func NewStmSerial(path string, baud int, debug bool) *StmSerial {
 			Baud: baud,
 		},
 		StmCommon: StmCommon{
-			path:       path,
-			debug:      debug,
-			stopScan:   nil,
-			readerPool: pool.New(),
+			path:           path,
+			debug:          debug,
+			stopScan:       nil,
 			readerPoolDone: make(chan struct{}),
 		},
 	}
+	s.readerPool = pool.New(s.readerPoolDone)
 	s.Stm = &s
 	go s.readerPool.Start()
 	// TODO: add a stop method for Pool?
@@ -167,13 +167,13 @@ func (s *StmSerial) ready() (bool, error) {
 func NewStmGnss(path string, debug bool) *StmGnss {
 	s := StmGnss{
 		StmCommon: StmCommon{
-			path:       path,
-			debug:      debug,
-			stopScan:   nil,
-			readerPool: pool.New(),
+			path:           path,
+			debug:          debug,
+			stopScan:       nil,
 			readerPoolDone: make(chan struct{}),
 		},
 	}
+	s.readerPool = pool.New(s.readerPoolDone)
 	s.Stm = &s
 	go s.readerPool.Start()
 
