@@ -62,36 +62,6 @@ type StmSerial struct {
 	serPort *serial.Port
 }
 
-type reference struct {
-	sync.Mutex
-	count int
-}
-
-func (r *reference) Add() {
-	r.Lock()
-	defer r.Unlock()
-
-	r.count += 1
-}
-
-func (r *reference) Remove() {
-	r.Lock()
-	defer r.Unlock()
-
-	if r.count < 1 {
-		return
-	}
-
-	r.count -= 1
-}
-
-func (r *reference) Count() int {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.count
-}
-
 func NewStmSerial(path string, baud int, debug bool) *StmSerial {
 	s := StmSerial{
 		serConf: serial.Config{
@@ -306,42 +276,11 @@ func (s *StmCommon) startScan(device io.Reader) (stopScan chan struct{}) {
 	return
 }
 
-type reader struct {
-	Read chan []byte
-
-	poolClient *pool.Client
-	pool       *pool.Pool
-
-	// called when reader is closed
-	close func() error
-}
-
-func NewReader(p *pool.Pool, open func() error, close func() error) (*reader, error) {
-	if err := open(); err != nil {
-		return nil, err
-	}
-
-	r := make(chan []byte, 1)
-	poolClient := &pool.Client{Send: r}
-	p.Register <- poolClient
-	return &reader{
-		Read:       r,
-		poolClient: poolClient,
-		close:      close,
-		pool:       p,
-	}, nil
-}
-
-func (r *reader) Close() error {
-	r.pool.Unregister <- r.poolClient
-	return r.close()
-}
-
 func (s *StmGnss) ready() (bool, error) {
 	// device sends this message when it has booted
 	resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
 
-	r, err := NewReader(s.readerPool, s.open, s.close)
+	r, err := newReader(s.readerPool, s.open, s.close)
 	if err != nil {
 		return false, err
 	}
@@ -367,7 +306,7 @@ func (s *StmCommon) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- e
 		return
 	}
 
-	r, err := NewReader(s.readerPool, s.open, s.close)
+	r, err := newReader(s.readerPool, s.open, s.close)
 	if err != nil {
 		errCh <- err
 	}
@@ -614,7 +553,7 @@ func (s *StmCommon) saveAlamanac(path string) (err error) {
 // ackResponse is not empty). An error is returned if ackResponse is not empty
 // and it fails to find a match before it times out.
 func (s *StmCommon) sendCmd(cmd []byte, ackResponse []byte) (out []string, err error) {
-	r, err := NewReader(s.readerPool, s.open, s.close)
+	r, err := newReader(s.readerPool, s.open, s.close)
 	if err != nil {
 		return out, err
 	}
@@ -759,7 +698,7 @@ func (s *StmCommon) setTime() (err error) {
 	fmt.Println("Checking date/time on module...")
 	var rawTime, rawDate string
 
-	r, err := NewReader(s.readerPool, s.open, s.close)
+	r, err := newReader(s.readerPool, s.open, s.close)
 	if err != nil {
 		return
 	}
