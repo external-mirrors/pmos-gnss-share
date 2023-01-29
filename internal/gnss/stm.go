@@ -41,8 +41,9 @@ type StmCommon struct {
 	debug  bool
 	sync.Mutex
 
-	stopScan   chan struct{}
-	readerPool *pool.Pool
+	stopScan       chan struct{}
+	readerPool     *pool.Pool
+	readerPoolDone <-chan struct{}
 }
 
 // StmGnss is a STM module connected through the GNSS subsystem in the Linux
@@ -102,6 +103,7 @@ func NewStmSerial(path string, baud int, debug bool) *StmSerial {
 			debug:      debug,
 			stopScan:   nil,
 			readerPool: pool.New(),
+			readerPoolDone: make(chan struct{}),
 		},
 	}
 	s.Stm = &s
@@ -169,6 +171,7 @@ func NewStmGnss(path string, debug bool) *StmGnss {
 			debug:      debug,
 			stopScan:   nil,
 			readerPool: pool.New(),
+			readerPoolDone: make(chan struct{}),
 		},
 	}
 	s.Stm = &s
