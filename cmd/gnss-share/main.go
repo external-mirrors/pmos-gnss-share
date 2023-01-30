@@ -58,6 +58,8 @@ func main() {
 		driver = gnss.NewStmGnss(conf.DevicePath, debug)
 	case "stm_serial":
 		driver = gnss.NewStmSerial(conf.DevicePath, conf.BaudRate, debug)
+	case "qcom":
+		driver = gnss.NewQcom(debug)
 	}
 
 	switch cmd := flag.Arg(0); cmd {
