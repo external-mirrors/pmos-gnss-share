@@ -1,46 +1,22 @@
-An app for sharing GNSS location data, with support multiple clients and
-loading/saving AGPS data.
+gnss-share is an app that facilitates sharing GNSS location data with multiple
+clients, while providing a way to perform device-specific setup beforehand. For
+some devices, it can also manage loading and storing A-GPS data.
 
 This is meant to replace things like `gpsd`, and `gps-share`, and work together
 with `geoclue`* or other clients that support fetching NMEA location data over
 sockets.
 
-*To work with `geoclue`, [these patches are required.](https://gitlab.freedesktop.org/geoclue/geoclue/-/merge_requests/79/diffs) A future version of
-`geoclue` should work out of the box after pointing it to the socket created by
-this app.
-
 # Configuration
 
 `gnss-share.conf` can be used to change the listening socket, group owner for
-socket, and other options. The application looks for this file in either the
-current working directory, or in `/etc/gnss-share.conf`.
+socket, and other options. See `man gnss-share.conf` for details.
 
-See this file for descriptions of supported options.
+The application looks for this file in either the
+current working directory, or in `/etc/gnss-share.conf`.
 
 # Usage
 
-```
-usage: gnss-share COMMAND [OPTION...]
-Commands:
-  [none]        The default behavior if no command is specified is to run in server mode.
-  store         Store almanac and ephemerides data and quit.
-  load          Load almanac and ephemerides data and quit.
-Options:
-  -c string
-        Configuration file to use. (default "/etc/gnss-share.conf")
-  -h    Print help and quit.
-```
-
-In addition to the command line options, this application will respond to the
-following signals when in "server" mode:
-
-- `SIGUSR1` - The application will load AGPS data from the directory
-  `agps_directory` specified in the configuration file, and continue running
-  afterward.
-
-- `SIGUSR2` - The application will store AGPS data to the directory
-  `agps_directory` specified in the configuration file, and continue running
-  afterward.
+See `man 1 gnss-share`.
 
 # Installation
 
