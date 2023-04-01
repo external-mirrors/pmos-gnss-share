@@ -1,5 +1,6 @@
 [Unit]
 Description=Manage access to and AGPS on GNSS devices
+Documentation=https://gitlab.com/postmarketOS/gnss-share
 Before=gpsd.service gpsd.socket geoclue.service
 
 [Service]
