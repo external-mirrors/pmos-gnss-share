@@ -707,22 +707,26 @@ func (s *StmCommon) setTime() (err error) {
 get_time_loop:
 	for {
 		select {
-		case line := <-r.Read:
-			// RMC contains both date and time from the module
-			if len(line) > 7 && !bytes.Equal(line[:6], []byte("$GPRMC")) {
-				continue
-			}
+		case data := <-r.Read:
+			for _, line := range bytes.Split(data, []byte("\n")) {
+				// RMC contains both date and time from the module
+				if len(line) > 7 && !bytes.Equal(line[:6], []byte("$GPRMC")) {
+					fmt.Println("oops1")
+					continue
+				}
 
-			parts := bytes.Split(line, []byte(","))
-			if len(parts) < 10 {
-				// malformed RMC sentence
-				continue
-			}
+				parts := bytes.Split(line, []byte(","))
+				if len(parts) < 10 {
+					// malformed RMC sentence
+					fmt.Println("oops2")
+					continue
+				}
 
-			// $GPRMC,232520.000,A,XXXXXXXX,N,YYYYYYYYYY,W,0.3,326.7,060622,,,A*76
-			rawTime = string(parts[1])
-			rawDate = string(parts[9])
-			break get_time_loop
+				// $GPRMC,232520.000,A,XXXXXXXX,N,YYYYYYYYYY,W,0.3,326.7,060622,,,A*76
+				rawTime = string(parts[1])
+				rawDate = string(parts[9])
+				break get_time_loop
+			}
 		case <-timeout:
 			return fmt.Errorf("stm/setTime: timed out waiting for device")
 		}
