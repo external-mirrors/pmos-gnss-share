@@ -225,6 +225,9 @@ func (s *StmCommon) readlines(device io.Reader) (sendCh chan []byte, errCh chan 
 			default:
 				scanner.Scan()
 				line = bytes.TrimSpace(scanner.Bytes())
+				fmt.Println("*********")
+				fmt.Println(string(line))
+				fmt.Println("*********")
 				err := scanner.Err()
 				if err != nil {
 					// don't block on sending errors
