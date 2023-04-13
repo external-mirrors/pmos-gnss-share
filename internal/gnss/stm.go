@@ -254,6 +254,8 @@ func (s *StmCommon) startScan(device io.Reader) (stopScan chan struct{}) {
 	recvCh, errCh, stopReadlinesCh := s.readlines(device)
 	stopScan = make(chan struct{})
 
+	s.readerPool.SetBroadcastChan(recvCh)
+
 	go func() {
 		defer close(stopReadlinesCh)
 
@@ -262,9 +264,6 @@ func (s *StmCommon) startScan(device io.Reader) (stopScan chan struct{}) {
 			case <-stopScan:
 				// TODO:
 				return
-			case line := <-recvCh:
-				// TODO: this could be blocking?
-				s.readerPool.Broadcast <- line
 			case err := <-errCh:
 				if err != nil {
 					fmt.Printf("ERROR: startScan: %s\n", err)
