@@ -68,3 +68,9 @@ func (p *Pool) Count() (count int) {
 	count = len(p.Clients)
 	return
 }
+
+func (p *Pool) SetBroadcastChan(newChan chan []byte) {
+	p.Lock()
+	p.Broadcast = newChan
+	defer p.Unlock()
+}
