@@ -70,7 +70,6 @@ func (s *Server) Start() (err error) {
 
 	// connection handler
 	fmt.Printf("Starting GNSS server, accepting connections at: %s\n", s.socket)
-	go s.connectionHandler()
 
 	s.connectionHandler()
 	return nil
