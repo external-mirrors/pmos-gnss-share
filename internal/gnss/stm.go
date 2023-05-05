@@ -23,17 +23,7 @@ import (
 	"gitlab.com/postmarketOS/gnss-share/internal/pool"
 )
 
-type Stm interface {
-	open() (err error)
-	close() (err error)
-	Restore() (err error)
-	Reset() (err error)
-	SetParam(cdbId int, value uint64) (err error)
-	GetParam(cdbId int) (val uint64, err error)
-}
-
 type StmCommon struct {
-	Stm
 	path   string
 	device io.ReadWriteCloser
 	ref    reference
@@ -64,7 +54,6 @@ func NewStmSerial(path string, baud int, debug bool) *StmCommon {
 	}
 	s.ready = func(t time.Duration) error { return nil }
 	s.readerPool = pool.New(s.readerPoolDone)
-	s.Stm = &s
 	go s.readerPool.Start()
 	// TODO: add a stop method for Pool?
 
@@ -130,7 +119,6 @@ func NewStmGnss(path string, debug bool) *StmCommon {
 		readerPoolDone: make(chan struct{}),
 	}
 	s.readerPool = pool.New(s.readerPoolDone)
-	s.Stm = &s
 	go s.readerPool.Start()
 
 	s.openDevice = func() (io.ReadWriteCloser, error) {
