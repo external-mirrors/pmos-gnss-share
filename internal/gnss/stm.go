@@ -44,36 +44,24 @@ type StmCommon struct {
 	stopScan       chan struct{}
 	readerPool     *pool.Pool
 	readerPoolDone <-chan struct{}
+
+	openDevice func() (io.ReadWriteCloser, error)
 }
 
-// StmGnss is a STM module connected through the GNSS subsystem in the Linux
-// kernel. It is commonly available through /dev/gnssN
-type StmGnss struct {
-	StmCommon
-	device *os.File
-}
 
-// StmSerial is a STM module accessed directly over a serial interface on the
-// system, e.g. via /dev/ttyN or /dev/ttyUSBN. It is *not* using the GNSS
-// subsystem in the Linux kernel.
-type StmSerial struct {
-	StmCommon
-	serConf serial.Config
-	serPort *serial.Port
-}
+func NewStmSerial(path string, baud int, debug bool) *StmCommon {
+	s := StmCommon{
+		path:           path,
+		debug:          debug,
+		stopScan:       nil,
+		readerPoolDone: make(chan struct{}),
+	}
 
-func NewStmSerial(path string, baud int, debug bool) *StmSerial {
-	s := StmSerial{
-		serConf: serial.Config{
+	s.openDevice = func() (io.ReadWriteCloser, error) {
+		return serial.OpenPort(&serial.Config{
 			Name: path,
 			Baud: baud,
-		},
-		StmCommon: StmCommon{
-			path:           path,
-			debug:          debug,
-			stopScan:       nil,
-			readerPoolDone: make(chan struct{}),
-		},
+		})
 	}
 	s.readerPool = pool.New(s.readerPoolDone)
 	s.Stm = &s
@@ -83,92 +71,21 @@ func NewStmSerial(path string, baud int, debug bool) *StmSerial {
 	return &s
 }
 
-func (s *StmSerial) open() (err error) {
+func (s *StmCommon) open() error {
 	s.ref.Add()
 	if s.ref.Count() > 1 {
-		return
+		return nil
 	}
-	s.Lock()
-	s.serPort, err = serial.OpenPort(&s.serConf)
+
+	var err error
+	s.device, err = s.openDevice()
 	if err != nil {
-		err = fmt.Errorf("gnss/StmSerial.Open(): %w", err)
-		return
+		return err
 	}
-	s.device = s.serPort
-	s.Unlock()
 
 	// Send the command to resume just in case the module is in a suspended
 	// state
 	s.resume()
-
-	s.stopScan = s.startScan(s.serPort)
-
-	return
-}
-
-func (s *StmSerial) close() (err error) {
-	s.ref.Remove()
-
-	if s.ref.Count() >= 1 {
-		return
-	}
-
-	s.Lock()
-	defer s.Unlock()
-	if s.stopScan != nil {
-		close(s.stopScan)
-		s.stopScan = nil
-	}
-
-	err = s.serPort.Close()
-	if err != nil {
-		err = fmt.Errorf("gnss/StmSerial.Close: %w", err)
-		return
-	}
-	s.serPort = nil
-
-	return
-}
-
-func (s *StmSerial) ready() (bool, error) {
-	return true, nil
-}
-
-func NewStmGnss(path string, debug bool) *StmGnss {
-	s := StmGnss{
-		StmCommon: StmCommon{
-			path:           path,
-			debug:          debug,
-			stopScan:       nil,
-			readerPoolDone: make(chan struct{}),
-		},
-	}
-	s.readerPool = pool.New(s.readerPoolDone)
-	s.Stm = &s
-	go s.readerPool.Start()
-
-	return &s
-}
-
-func (s *StmGnss) open() (err error) {
-	s.ref.Add()
-	if s.ref.Count() > 1 {
-		return
-	}
-	// Using syscall.Open will open the file in non-pollable mode, which
-	// results in a significant reduction in CPU usage on ARM64 systems,
-	// and no noticeable impact on x86_64. We don't need to poll the file
-	// since it's just a constant stream of new data from the kernel's GNSS
-	// subsystem
-	fd, err := syscall.Open(s.path, os.O_RDWR, 0666)
-	if err != nil {
-		err = fmt.Errorf("gnss/Stm.Open(): %w", err)
-		return
-	}
-	s.Lock()
-	s.device = os.NewFile(uintptr(fd), s.path)
-
-	s.Unlock()
 
 	// TODO: 3 seconds should be more than enough time for the module to boot.
 	// This is a total hack... but it's simpler than implementing a routine to
@@ -178,30 +95,56 @@ func (s *StmGnss) open() (err error) {
 
 	s.stopScan = s.startScan(s.device)
 
-	return
+	return nil
 }
 
-func (s *StmGnss) close() (err error) {
+func (s *StmCommon) close() error {
 	s.ref.Remove()
 
 	if s.ref.Count() >= 1 {
-		return
+		return nil
 	}
 
+	s.Lock()
+	defer s.Unlock()
 	if s.stopScan != nil {
 		close(s.stopScan)
 		s.stopScan = nil
 	}
 
-	s.Lock()
-	defer s.Unlock()
-	err = s.device.Close()
-	if err != nil {
-		err = fmt.Errorf("gnss/Stm.Close: %w", err)
+	if err := s.device.Close(); err != nil {
+		return fmt.Errorf("stm failed to close device: %w", err)
 	}
 	s.device = nil
 
-	return
+	return nil
+}
+
+func NewStmGnss(path string, debug bool) *StmCommon {
+	s := StmCommon{
+		path:           path,
+		debug:          debug,
+		stopScan:       nil,
+		readerPoolDone: make(chan struct{}),
+	}
+	s.readerPool = pool.New(s.readerPoolDone)
+	s.Stm = &s
+	go s.readerPool.Start()
+
+	s.openDevice = func() (io.ReadWriteCloser, error) {
+		// Using syscall.Open will open the file in non-pollable mode, which
+		// results in a significant reduction in CPU usage on ARM64 systems,
+		// and no noticeable impact on x86_64. We don't need to poll the file
+		// since it's just a constant stream of new data from the kernel's GNSS
+		// subsystem
+		fd, err := syscall.Open(s.path, os.O_RDWR, 0666)
+		if err != nil {
+			return nil, fmt.Errorf("stm: failed opening %q: %w", path, err)
+		}
+		return os.NewFile(uintptr(fd), s.path), nil
+	}
+
+	return &s
 }
 
 func (s *StmCommon) readlines(device io.Reader) (sendCh chan []byte, errCh chan error, stopCh chan struct{}) {
@@ -275,28 +218,32 @@ func (s *StmCommon) startScan(device io.Reader) (stopScan chan struct{}) {
 	return
 }
 
-func (s *StmGnss) ready() (bool, error) {
-	// device sends this message when it has booted
-	resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
-
-	r, err := newReader(s.readerPool, s.open, s.close)
-	if err != nil {
-		return false, err
-	}
-	defer r.Close()
-
-	timeout := time.After(5 * time.Second)
-	for {
-		select {
-		case line := <-r.Read:
-			if bytes.Contains(line, resp) {
-				return true, nil
-			}
-		case <-timeout:
-			return false, fmt.Errorf("gnss/StmCommon.ready: timed out waiting for device")
-		}
-	}
+func (s *StmCommon) ready() (bool, error) {
+	return true, nil
 }
+
+// func (s *StmGnss) ready() (bool, error) {
+// 	// device sends this message when it has booted
+// 	resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
+
+// 	r, err := newReader(s.readerPool, s.open, s.close)
+// 	if err != nil {
+// 		return false, err
+// 	}
+// 	defer r.Close()
+
+// 	timeout := time.After(5 * time.Second)
+// 	for {
+// 		select {
+// 		case line := <-r.Read:
+// 			if bytes.Contains(line, resp) {
+// 				return true, nil
+// 			}
+// 		case <-timeout:
+// 			return false, fmt.Errorf("gnss/StmCommon.ready: timed out waiting for device")
+// 		}
+// 	}
+// }
 
 func (s *StmCommon) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- error) {
 	// TODO: allow disabling this in config:
