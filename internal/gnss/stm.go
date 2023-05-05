@@ -26,7 +26,6 @@ import (
 type Stm interface {
 	open() (err error)
 	close() (err error)
-	ready(time.Duration) error
 	Restore() (err error)
 	Reset() (err error)
 	SetParam(cdbId int, value uint64) (err error)
@@ -46,8 +45,8 @@ type StmCommon struct {
 	readerPoolDone <-chan struct{}
 
 	openDevice func() (io.ReadWriteCloser, error)
+	ready      func(time.Duration) error
 }
-
 
 func NewStmSerial(path string, baud int, debug bool) *StmCommon {
 	s := StmCommon{
@@ -63,6 +62,7 @@ func NewStmSerial(path string, baud int, debug bool) *StmCommon {
 			Baud: baud,
 		})
 	}
+	s.ready = func(t time.Duration) error { return nil }
 	s.readerPool = pool.New(s.readerPoolDone)
 	s.Stm = &s
 	go s.readerPool.Start()
@@ -91,7 +91,9 @@ func (s *StmCommon) open() error {
 	// This is a total hack... but it's simpler than implementing a routine to
 	// read data from the module and look for the response that indicates it
 	// has booted. Obviously this is far from ideal though...........
-	time.Sleep(3 * time.Second)
+	if err := s.ready(time.Duration(3 * time.Second)); err != nil {
+		return fmt.Errorf("stm device is not ready")
+	}
 
 	s.stopScan = s.startScan(s.device)
 
@@ -142,6 +144,28 @@ func NewStmGnss(path string, debug bool) *StmCommon {
 			return nil, fmt.Errorf("stm: failed opening %q: %w", path, err)
 		}
 		return os.NewFile(uintptr(fd), s.path), nil
+	}
+
+	s.ready = func(t time.Duration) error {
+		// device sends this message when it has booted
+		resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
+
+		r, err := newReader(s.readerPool, s.open, s.close)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+
+		for {
+			select {
+			case line := <-r.Read:
+				if bytes.Contains(line, resp) {
+					return nil
+				}
+			case <-time.After(t):
+				return fmt.Errorf("stm: timed out waiting for device to become ready")
+			}
+		}
 	}
 
 	return &s
@@ -217,33 +241,6 @@ func (s *StmCommon) startScan(device io.Reader) (stopScan chan struct{}) {
 
 	return
 }
-
-func (s *StmCommon) ready() error {
-	return nil
-}
-
-// func (s *StmGnss) ready() (bool, error) {
-// 	// device sends this message when it has booted
-// 	resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
-
-// 	r, err := newReader(s.readerPool, s.open, s.close)
-// 	if err != nil {
-// 		return false, err
-// 	}
-// 	defer r.Close()
-
-// 	timeout := time.After(5 * time.Second)
-// 	for {
-// 		select {
-// 		case line := <-r.Read:
-// 			if bytes.Contains(line, resp) {
-// 				return true, nil
-// 			}
-// 		case <-timeout:
-// 			return false, fmt.Errorf("gnss/StmCommon.ready: timed out waiting for device")
-// 		}
-// 	}
-// }
 
 func (s *StmCommon) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- error) {
 	// TODO: allow disabling this in config:
