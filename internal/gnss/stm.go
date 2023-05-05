@@ -36,7 +36,7 @@ type Stm interface {
 type StmCommon struct {
 	Stm
 	path   string
-	writer io.Writer
+	device io.Writer
 	ref    reference
 	debug  bool
 	sync.Mutex
@@ -94,7 +94,7 @@ func (s *StmSerial) open() (err error) {
 		err = fmt.Errorf("gnss/StmSerial.Open(): %w", err)
 		return
 	}
-	s.writer = s.serPort
+	s.device = s.serPort
 	s.Unlock()
 
 	// Send the command to resume just in case the module is in a suspended
@@ -168,7 +168,6 @@ func (s *StmGnss) open() (err error) {
 	s.Lock()
 	s.device = os.NewFile(uintptr(fd), s.path)
 
-	s.writer = s.device
 	s.Unlock()
 
 	// TODO: 3 seconds should be more than enough time for the module to boot.
@@ -621,7 +620,7 @@ func (s *StmCommon) write(data []byte) (err error) {
 		fmt.Printf("write: %s\n", string(data))
 	}
 	// add crlf
-	_, err = s.writer.Write(append(data, 0x0D, 0x0A))
+	_, err = s.device.Write(append(data, 0x0D, 0x0A))
 	if err != nil {
 		err = fmt.Errorf("gnss/StmCommon.write: %w", err)
 		return
