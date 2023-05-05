@@ -36,7 +36,7 @@ type Stm interface {
 type StmCommon struct {
 	Stm
 	path   string
-	device io.Writer
+	device io.ReadWriteCloser
 	ref    reference
 	debug  bool
 	sync.Mutex
