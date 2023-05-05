@@ -26,7 +26,7 @@ import (
 type Stm interface {
 	open() (err error)
 	close() (err error)
-	ready() (bool, error)
+	ready(time.Duration) error
 	Restore() (err error)
 	Reset() (err error)
 	SetParam(cdbId int, value uint64) (err error)
@@ -218,8 +218,8 @@ func (s *StmCommon) startScan(device io.Reader) (stopScan chan struct{}) {
 	return
 }
 
-func (s *StmCommon) ready() (bool, error) {
-	return true, nil
+func (s *StmCommon) ready() error {
+	return nil
 }
 
 // func (s *StmGnss) ready() (bool, error) {
