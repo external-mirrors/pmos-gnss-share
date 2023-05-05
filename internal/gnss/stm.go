@@ -28,7 +28,7 @@ type Stm struct {
 	device io.ReadWriteCloser
 	ref    reference
 	debug  bool
-	sync.Mutex
+	mu     sync.Mutex
 
 	stopScan       chan struct{}
 	readerPool     *pool.Pool
@@ -67,15 +67,15 @@ func (s *Stm) open() error {
 	}
 
 	// Protected Section
-	s.Lock()
+	s.mu.Lock()
 	var err error
 	s.device, err = s.openDevice()
 	if err != nil {
-		s.Unlock()
+		s.mu.Unlock()
 		return err
 	}
 	s.stopScan = s.startScan(s.device)
-	s.Unlock()
+	s.mu.Unlock()
 	// End Protected Section
 
 	// Send the command to resume just in case the module is in a suspended
@@ -100,8 +100,8 @@ func (s *Stm) close() error {
 		return nil
 	}
 
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.stopScan != nil {
 		close(s.stopScan)
 		s.stopScan = nil
