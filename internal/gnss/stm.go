@@ -66,11 +66,17 @@ func (s *Stm) open() error {
 		return nil
 	}
 
+	// Protected Section
+	s.Lock()
 	var err error
 	s.device, err = s.openDevice()
 	if err != nil {
+		s.Unlock()
 		return err
 	}
+	s.stopScan = s.startScan(s.device)
+	s.Unlock()
+	// End Protected Section
 
 	// Send the command to resume just in case the module is in a suspended
 	// state
@@ -83,8 +89,6 @@ func (s *Stm) open() error {
 	if err := s.ready(time.Duration(3 * time.Second)); err != nil {
 		return fmt.Errorf("stm device is not ready")
 	}
-
-	s.stopScan = s.startScan(s.device)
 
 	return nil
 }
