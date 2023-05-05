@@ -23,7 +23,7 @@ import (
 	"gitlab.com/postmarketOS/gnss-share/internal/pool"
 )
 
-type StmCommon struct {
+type Stm struct {
 	path   string
 	device io.ReadWriteCloser
 	ref    reference
@@ -38,8 +38,8 @@ type StmCommon struct {
 	ready      func(time.Duration) error
 }
 
-func NewStmSerial(path string, baud int, debug bool) *StmCommon {
-	s := StmCommon{
+func NewStmSerial(path string, baud int, debug bool) *Stm {
+	s := Stm{
 		path:           path,
 		debug:          debug,
 		stopScan:       nil,
@@ -60,7 +60,7 @@ func NewStmSerial(path string, baud int, debug bool) *StmCommon {
 	return &s
 }
 
-func (s *StmCommon) open() error {
+func (s *Stm) open() error {
 	s.ref.Add()
 	if s.ref.Count() > 1 {
 		return nil
@@ -89,7 +89,7 @@ func (s *StmCommon) open() error {
 	return nil
 }
 
-func (s *StmCommon) close() error {
+func (s *Stm) close() error {
 	s.ref.Remove()
 
 	if s.ref.Count() >= 1 {
@@ -111,8 +111,8 @@ func (s *StmCommon) close() error {
 	return nil
 }
 
-func NewStmGnss(path string, debug bool) *StmCommon {
-	s := StmCommon{
+func NewStmGnss(path string, debug bool) *Stm {
+	s := Stm{
 		path:           path,
 		debug:          debug,
 		stopScan:       nil,
@@ -159,7 +159,7 @@ func NewStmGnss(path string, debug bool) *StmCommon {
 	return &s
 }
 
-func (s *StmCommon) readlines(device io.Reader) (sendCh chan []byte, errCh chan error, stopCh chan struct{}) {
+func (s *Stm) readlines(device io.Reader) (sendCh chan []byte, errCh chan error, stopCh chan struct{}) {
 	stopCh = make(chan struct{})
 	sendCh = make(chan []byte)
 	errCh = make(chan error)
@@ -204,7 +204,7 @@ func (s *StmCommon) readlines(device io.Reader) (sendCh chan []byte, errCh chan 
 	return
 }
 
-func (s *StmCommon) startScan(device io.Reader) (stopScan chan struct{}) {
+func (s *Stm) startScan(device io.Reader) (stopScan chan struct{}) {
 	recvCh, errCh, stopReadlinesCh := s.readlines(device)
 	stopScan = make(chan struct{})
 
@@ -230,7 +230,7 @@ func (s *StmCommon) startScan(device io.Reader) (stopScan chan struct{}) {
 	return
 }
 
-func (s *StmCommon) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- error) {
+func (s *Stm) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- error) {
 	// TODO: allow disabling this in config:
 	if err := s.setTime(); err != nil {
 		errCh <- fmt.Errorf("gnss/stm.Start: %w", err)
@@ -253,7 +253,7 @@ func (s *StmCommon) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- e
 	}
 }
 
-func (s *StmCommon) Save(dir string) (err error) {
+func (s *Stm) Save(dir string) (err error) {
 	s.open()
 	defer s.close()
 
@@ -275,7 +275,7 @@ func (s *StmCommon) Save(dir string) (err error) {
 	return
 }
 
-func (s *StmCommon) Load(dir string) (err error) {
+func (s *Stm) Load(dir string) (err error) {
 	s.open()
 	defer s.close()
 
@@ -295,7 +295,7 @@ func (s *StmCommon) Load(dir string) (err error) {
 // GetParam returns the parameter value for the given CDB ID. See the STM Teseo
 // Liv3f gps software manual sections for PSTMSETPAR and relevant CBD for
 // possible IDs/values to use.
-func (s *StmCommon) GetParam(cdbId int) (val uint64, err error) {
+func (s *Stm) GetParam(cdbId int) (val uint64, err error) {
 	if err = s.open(); err != nil {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
@@ -314,14 +314,14 @@ func (s *StmCommon) GetParam(cdbId int) (val uint64, err error) {
 
 	for _, l := range out {
 		if strings.Contains(l, "PSTMGETPARERROR") {
-			err = fmt.Errorf("gnss/StmCommon.GetParam: PSTMGETPARERROR returned by module")
+			err = fmt.Errorf("gnss/Stm.GetParam: PSTMGETPARERROR returned by module")
 			return
 		}
 		if strings.Contains(l, fmt.Sprintf("PSTMSETPAR,%d", cdbId)) {
 			msg := strings.Split(l, "*")[0]
 			fields := strings.Split(msg, ",")
 			if len(fields) < 3 {
-				err = fmt.Errorf("gnss/StmCommon.GetParam: not enough fields in response from module")
+				err = fmt.Errorf("gnss/Stm.GetParam: not enough fields in response from module")
 				return
 			}
 			// try to parse with big.Parse first, sometimes module response is
@@ -339,18 +339,18 @@ func (s *StmCommon) GetParam(cdbId int) (val uint64, err error) {
 			}
 
 			// value is in a format that needs to be handled..
-			err = fmt.Errorf("gnss/StmCommon.GetParam: Unable to parse returned value: %q", fields[2])
+			err = fmt.Errorf("gnss/Stm.GetParam: Unable to parse returned value: %q", fields[2])
 			return
 		}
 	}
-	err = fmt.Errorf("gnss/StmCommon.GetParam: no response sent by module")
+	err = fmt.Errorf("gnss/Stm.GetParam: no response sent by module")
 	return
 }
 
 // SetParam sets parameters in the given configuration data block. See the STM
 // Teseo Liv3f gps software manual sections for PSTMSETPAR and relevant CBD for
 // possible IDs/values to use.
-func (s *StmCommon) SetParam(cdbId int, value uint64) (err error) {
+func (s *Stm) SetParam(cdbId int, value uint64) (err error) {
 	if err = s.open(); err != nil {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
@@ -370,7 +370,7 @@ func (s *StmCommon) SetParam(cdbId int, value uint64) (err error) {
 	)
 	out, err := s.sendCmd(msgListCmd, []byte("SETPAROK"))
 	if err != nil {
-		err = fmt.Errorf("gnss/StmCommon.SetParam: %w", err)
+		err = fmt.Errorf("gnss/Stm.SetParam: %w", err)
 		s.resume()
 		return
 	}
@@ -391,7 +391,7 @@ func (s *StmCommon) SetParam(cdbId int, value uint64) (err error) {
 	return
 }
 
-func (s *StmCommon) Reset() (err error) {
+func (s *Stm) Reset() (err error) {
 	if err = s.open(); err != nil {
 		err = fmt.Errorf("gnss/stmCommon.Reset: %w", err)
 		return
@@ -403,7 +403,7 @@ func (s *StmCommon) Reset() (err error) {
 	return
 }
 
-func (s *StmCommon) Restore() (err error) {
+func (s *Stm) Restore() (err error) {
 	if err = s.open(); err != nil {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
@@ -422,7 +422,7 @@ func (s *StmCommon) Restore() (err error) {
 	return
 }
 
-func (s *StmCommon) saveEphemeris(path string) (err error) {
+func (s *Stm) saveEphemeris(path string) (err error) {
 	fmt.Printf("Storing ephemerides to: %q\n", path)
 
 	err = s.pause()
@@ -433,12 +433,12 @@ func (s *StmCommon) saveEphemeris(path string) (err error) {
 
 	out, err := s.sendCmd(nmea.New("PSTMDUMPEPHEMS", []string{}), []byte("DUMPEPHEMS"))
 	if err != nil {
-		return fmt.Errorf("gnss/StmCommon.saveEphemeris: %w", err)
+		return fmt.Errorf("gnss/Stm.saveEphemeris: %w", err)
 	}
 
 	fd, err := os.Create(path)
 	if err != nil {
-		err = fmt.Errorf("gnss/StmCommon.Save: error saving to file %q: %w", path, err)
+		err = fmt.Errorf("gnss/Stm.Save: error saving to file %q: %w", path, err)
 		return
 	}
 	defer fd.Close()
@@ -451,7 +451,7 @@ func (s *StmCommon) saveEphemeris(path string) (err error) {
 	return
 }
 
-func (s *StmCommon) saveAlamanac(path string) (err error) {
+func (s *Stm) saveAlamanac(path string) (err error) {
 	fmt.Printf("Storing almanac to: %q\n", path)
 
 	err = s.pause()
@@ -462,12 +462,12 @@ func (s *StmCommon) saveAlamanac(path string) (err error) {
 
 	out, err := s.sendCmd(nmea.New("PSTMDUMPALMANAC", []string{}), []byte("DUMPALMANAC"))
 	if err != nil {
-		return fmt.Errorf("gnss/StmCommon.saveAlmanac: %w", err)
+		return fmt.Errorf("gnss/Stm.saveAlmanac: %w", err)
 	}
 
 	fd, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("gnss/StmCommon.saveAlamanac: error saving to file %q: %w", path, err)
+		return fmt.Errorf("gnss/Stm.saveAlamanac: error saving to file %q: %w", path, err)
 	}
 	defer fd.Close()
 
@@ -483,7 +483,7 @@ func (s *StmCommon) saveAlamanac(path string) (err error) {
 // comparing ackResponse to the data it receives from the module (if
 // ackResponse is not empty). An error is returned if ackResponse is not empty
 // and it fails to find a match before it times out.
-func (s *StmCommon) sendCmd(cmd []byte, ackResponse []byte) (out []string, err error) {
+func (s *Stm) sendCmd(cmd []byte, ackResponse []byte) (out []string, err error) {
 	r, err := newReader(s.readerPool, s.open, s.close)
 	if err != nil {
 		return out, err
@@ -495,7 +495,7 @@ func (s *StmCommon) sendCmd(cmd []byte, ackResponse []byte) (out []string, err e
 	}
 	err = s.write([]byte(cmd))
 	if err != nil {
-		err = fmt.Errorf("gnss/StmCommon.sendCmd: %w", err)
+		err = fmt.Errorf("gnss/Stm.sendCmd: %w", err)
 		return
 	}
 
@@ -522,49 +522,49 @@ timeout_loop:
 			}
 			out = append(out, string(line))
 		case <-timeout:
-			return out, fmt.Errorf("gnss/StmCommon.sendCmd: timed out waiting for device")
+			return out, fmt.Errorf("gnss/Stm.sendCmd: timed out waiting for device")
 		}
 	}
 
 	return
 }
 
-func (s *StmCommon) pause() (err error) {
+func (s *Stm) pause() (err error) {
 	_, err = s.sendCmd(nmea.New("PSTMGPSSUSPEND", []string{}), nil)
 	if err != nil {
-		return fmt.Errorf("gnss/StmCommon.pause: %w", err)
+		return fmt.Errorf("gnss/Stm.pause: %w", err)
 	}
 
 	return
 }
 
-func (s *StmCommon) resume() (err error) {
+func (s *Stm) resume() (err error) {
 	_, err = s.sendCmd(nmea.New("PSTMGPSRESTART", []string{}), nil)
 	if err != nil {
-		return fmt.Errorf("gnss/StmCommon.pause: %w", err)
+		return fmt.Errorf("gnss/Stm.pause: %w", err)
 	}
 
 	return
 }
 
-func (s *StmCommon) write(data []byte) (err error) {
+func (s *Stm) write(data []byte) (err error) {
 	if s.debug {
 		fmt.Printf("write: %s\n", string(data))
 	}
 	// add crlf
 	_, err = s.device.Write(append(data, 0x0D, 0x0A))
 	if err != nil {
-		err = fmt.Errorf("gnss/StmCommon.write: %w", err)
+		err = fmt.Errorf("gnss/Stm.write: %w", err)
 		return
 	}
 
 	return
 }
 
-func (s *StmCommon) loadEphemeris(path string) (err error) {
+func (s *Stm) loadEphemeris(path string) (err error) {
 	fd, err := os.Open(path)
 	if err != nil {
-		err = fmt.Errorf("gnss/StmCommon.loadEphemeris: %w", err)
+		err = fmt.Errorf("gnss/Stm.loadEphemeris: %w", err)
 		return
 	}
 	defer fd.Close()
@@ -585,17 +585,17 @@ func (s *StmCommon) loadEphemeris(path string) (err error) {
 	for _, line := range lines {
 		_, err = s.sendCmd(line, []byte("EPHEMOK"))
 		if err != nil {
-			return fmt.Errorf("gnss/StmCommon.loadEphemeris: %w", err)
+			return fmt.Errorf("gnss/Stm.loadEphemeris: %w", err)
 		}
 	}
 
 	return
 }
 
-func (s *StmCommon) loadAlmanac(path string) (err error) {
+func (s *Stm) loadAlmanac(path string) (err error) {
 	fd, err := os.Open(path)
 	if err != nil {
-		err = fmt.Errorf("gnss/StmCommon.loadAlmanac: %w", err)
+		err = fmt.Errorf("gnss/Stm.loadAlmanac: %w", err)
 		return
 	}
 	defer fd.Close()
@@ -617,7 +617,7 @@ func (s *StmCommon) loadAlmanac(path string) (err error) {
 	for _, line := range lines {
 		_, err = s.sendCmd(line, []byte("ALMANACOK"))
 		if err != nil {
-			return fmt.Errorf("gnss/StmCommon.loadAlmanac: %w", err)
+			return fmt.Errorf("gnss/Stm.loadAlmanac: %w", err)
 		}
 	}
 
@@ -625,7 +625,7 @@ func (s *StmCommon) loadAlmanac(path string) (err error) {
 }
 
 // Set the time for the module if it deviates from host/OS time.
-func (s *StmCommon) setTime() (err error) {
+func (s *Stm) setTime() (err error) {
 	fmt.Println("Checking date/time on module...")
 	var rawTime, rawDate string
 
