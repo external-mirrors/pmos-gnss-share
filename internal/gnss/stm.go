@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tarm/serial"
+	"gitlab.com/postmarketOS/gnss-share/internal/gnss/common"
 	"gitlab.com/postmarketOS/gnss-share/internal/nmea"
 	"gitlab.com/postmarketOS/gnss-share/internal/pool"
 )
@@ -26,7 +27,7 @@ import (
 type Stm struct {
 	path   string
 	device io.ReadWriteCloser
-	ref    reference
+	ref    common.Reference
 	debug  bool
 	mu     sync.Mutex
 
@@ -142,7 +143,7 @@ func NewStmGnss(path string, debug bool) *Stm {
 		// device sends this message when it has booted
 		resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
 
-		r, err := newReader(s.readerPool, s.open, s.close)
+		r, err := common.NewReader(s.readerPool, s.open, s.close)
 		if err != nil {
 			return err
 		}
@@ -241,7 +242,7 @@ func (s *Stm) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- error) 
 		return
 	}
 
-	r, err := newReader(s.readerPool, s.open, s.close)
+	r, err := common.NewReader(s.readerPool, s.open, s.close)
 	if err != nil {
 		errCh <- err
 	}
@@ -488,7 +489,7 @@ func (s *Stm) saveAlamanac(path string) (err error) {
 // ackResponse is not empty). An error is returned if ackResponse is not empty
 // and it fails to find a match before it times out.
 func (s *Stm) write(cmd []byte, ackResponse []byte) (out []string, err error) {
-	r, err := newReader(s.readerPool, s.open, s.close)
+	r, err := common.NewReader(s.readerPool, s.open, s.close)
 	if err != nil {
 		return out, err
 	}
@@ -625,7 +626,7 @@ func (s *Stm) setTime() (err error) {
 	fmt.Println("Checking date/time on module...")
 	var rawTime, rawDate string
 
-	r, err := newReader(s.readerPool, s.open, s.close)
+	r, err := common.NewReader(s.readerPool, s.open, s.close)
 	if err != nil {
 		return
 	}

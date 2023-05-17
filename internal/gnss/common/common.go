@@ -1,12 +1,11 @@
 // Copyright 2023 Clayton Craft <clayton@craftyguy.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package gnss
+package common
 
 import (
-	"sync"
-
 	"gitlab.com/postmarketOS/gnss-share/internal/pool"
+	"sync"
 )
 
 type reader struct {
@@ -21,7 +20,7 @@ type reader struct {
 
 // Initializes a new reader and registers it with the given pool, and calls the
 // open() func. Any error from open() is bubbled up.
-func newReader(p *pool.Pool, open func() error, close func() error) (*reader, error) {
+func NewReader(p *pool.Pool, open func() error, close func() error) (*reader, error) {
 	if err := open(); err != nil {
 		return nil, err
 	}
@@ -44,19 +43,19 @@ func (r *reader) Close() error {
 }
 
 // A simple ref counting type
-type reference struct {
+type Reference struct {
 	sync.Mutex
 	count int
 }
 
-func (r *reference) Add() {
+func (r *Reference) Add() {
 	r.Lock()
 	defer r.Unlock()
 
 	r.count += 1
 }
 
-func (r *reference) Remove() {
+func (r *Reference) Remove() {
 	r.Lock()
 	defer r.Unlock()
 
@@ -67,7 +66,7 @@ func (r *reference) Remove() {
 	r.count -= 1
 }
 
-func (r *reference) Count() int {
+func (r *Reference) Count() int {
 	r.Lock()
 	defer r.Unlock()
 
