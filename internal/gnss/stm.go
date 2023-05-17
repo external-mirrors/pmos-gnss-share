@@ -310,7 +310,7 @@ func (s *Stm) GetParam(cdbId int) (val uint64, err error) {
 	defer s.resume()
 
 	// the module responds with STMSETPAR to a GETPAR command
-	out, err := s.sendCmd(nmea.New("PSTMGETPAR", []string{fmt.Sprintf("%d", cdbId)}), []byte("SETPAR"))
+	out, err := s.write(nmea.New("PSTMGETPAR", []string{fmt.Sprintf("%d", cdbId)}), []byte("SETPAR"))
 	if err != nil {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
@@ -372,7 +372,7 @@ func (s *Stm) SetParam(cdbId int, value uint64) (err error) {
 		fmt.Sprintf("%d", 0),
 	},
 	)
-	out, err := s.sendCmd(msgListCmd, []byte("SETPAROK"))
+	out, err := s.write(msgListCmd, []byte("SETPAROK"))
 	if err != nil {
 		err = fmt.Errorf("gnss/Stm.SetParam: %w", err)
 		s.resume()
@@ -386,12 +386,12 @@ func (s *Stm) SetParam(cdbId int, value uint64) (err error) {
 		}
 	}
 
-	_, err = s.sendCmd(nmea.New("PSTMSAVEPAR", []string{}), []byte("SAVEPAROK"))
+	_, err = s.write(nmea.New("PSTMSAVEPAR", []string{}), []byte("SAVEPAROK"))
 	if err != nil {
 		s.resume()
 		return
 	}
-	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), nil)
+	_, err = s.write(nmea.New("PSTMSRR", []string{}), nil)
 	return
 }
 
@@ -403,7 +403,7 @@ func (s *Stm) Reset() (err error) {
 
 	defer s.close()
 	s.pause()
-	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), nil)
+	_, err = s.write(nmea.New("PSTMSRR", []string{}), nil)
 	return
 }
 
@@ -417,12 +417,12 @@ func (s *Stm) Restore() (err error) {
 	s.pause()
 	// resume only on error, since system is reset on success
 
-	_, err = s.sendCmd(nmea.New("PSTMRESTOREPAR", []string{}), []byte("RESTOREPAROK"))
+	_, err = s.write(nmea.New("PSTMRESTOREPAR", []string{}), []byte("RESTOREPAROK"))
 	if err != nil {
 		s.resume()
 		return
 	}
-	_, err = s.sendCmd(nmea.New("PSTMSRR", []string{}), nil)
+	_, err = s.write(nmea.New("PSTMSRR", []string{}), nil)
 	return
 }
 
@@ -435,7 +435,7 @@ func (s *Stm) saveEphemeris(path string) (err error) {
 	}
 	defer s.resume()
 
-	out, err := s.sendCmd(nmea.New("PSTMDUMPEPHEMS", []string{}), []byte("DUMPEPHEMS"))
+	out, err := s.write(nmea.New("PSTMDUMPEPHEMS", []string{}), []byte("DUMPEPHEMS"))
 	if err != nil {
 		return fmt.Errorf("gnss/Stm.saveEphemeris: %w", err)
 	}
@@ -464,7 +464,7 @@ func (s *Stm) saveAlamanac(path string) (err error) {
 	}
 	defer s.resume()
 
-	out, err := s.sendCmd(nmea.New("PSTMDUMPALMANAC", []string{}), []byte("DUMPALMANAC"))
+	out, err := s.write(nmea.New("PSTMDUMPALMANAC", []string{}), []byte("DUMPALMANAC"))
 	if err != nil {
 		return fmt.Errorf("gnss/Stm.saveAlmanac: %w", err)
 	}
@@ -487,7 +487,7 @@ func (s *Stm) saveAlamanac(path string) (err error) {
 // comparing ackResponse to the data it receives from the module (if
 // ackResponse is not empty). An error is returned if ackResponse is not empty
 // and it fails to find a match before it times out.
-func (s *Stm) sendCmd(cmd []byte, ackResponse []byte) (out []string, err error) {
+func (s *Stm) write(cmd []byte, ackResponse []byte) (out []string, err error) {
 	r, err := newReader(s.readerPool, s.open, s.close)
 	if err != nil {
 		return out, err
@@ -495,11 +495,17 @@ func (s *Stm) sendCmd(cmd []byte, ackResponse []byte) (out []string, err error) 
 	defer r.Close()
 	cmd = bytes.TrimSpace(cmd)
 	if s.debug {
-		fmt.Println("sendCmd: writing: ", string(cmd))
+		fmt.Println("write: ", string(cmd))
 	}
-	err = s.write([]byte(cmd))
+	// add crlf
+	_, err = s.device.Write(append(cmd, 0x0D, 0x0A))
 	if err != nil {
-		err = fmt.Errorf("gnss/Stm.sendCmd: %w", err)
+		err = fmt.Errorf("write: %w", err)
+		return
+	}
+
+	if err != nil {
+		err = fmt.Errorf("write: %w", err)
 		return
 	}
 
@@ -526,7 +532,7 @@ timeout_loop:
 			}
 			out = append(out, string(line))
 		case <-timeout:
-			return out, fmt.Errorf("gnss/Stm.sendCmd: timed out waiting for device")
+			return out, fmt.Errorf("write: timed out waiting for device")
 		}
 	}
 
@@ -534,7 +540,7 @@ timeout_loop:
 }
 
 func (s *Stm) pause() (err error) {
-	_, err = s.sendCmd(nmea.New("PSTMGPSSUSPEND", []string{}), nil)
+	_, err = s.write(nmea.New("PSTMGPSSUSPEND", []string{}), nil)
 	if err != nil {
 		return fmt.Errorf("gnss/Stm.pause: %w", err)
 	}
@@ -543,23 +549,9 @@ func (s *Stm) pause() (err error) {
 }
 
 func (s *Stm) resume() (err error) {
-	_, err = s.sendCmd(nmea.New("PSTMGPSRESTART", []string{}), nil)
+	_, err = s.write(nmea.New("PSTMGPSRESTART", []string{}), nil)
 	if err != nil {
 		return fmt.Errorf("gnss/Stm.pause: %w", err)
-	}
-
-	return
-}
-
-func (s *Stm) write(data []byte) (err error) {
-	if s.debug {
-		fmt.Printf("write: %s\n", string(data))
-	}
-	// add crlf
-	_, err = s.device.Write(append(data, 0x0D, 0x0A))
-	if err != nil {
-		err = fmt.Errorf("gnss/Stm.write: %w", err)
-		return
 	}
 
 	return
@@ -587,7 +579,7 @@ func (s *Stm) loadEphemeris(path string) (err error) {
 	}
 
 	for _, line := range lines {
-		_, err = s.sendCmd(line, []byte("EPHEMOK"))
+		_, err = s.write(line, []byte("EPHEMOK"))
 		if err != nil {
 			return fmt.Errorf("gnss/Stm.loadEphemeris: %w", err)
 		}
@@ -619,7 +611,7 @@ func (s *Stm) loadAlmanac(path string) (err error) {
 	}
 
 	for _, line := range lines {
-		_, err = s.sendCmd(line, []byte("ALMANACOK"))
+		_, err = s.write(line, []byte("ALMANACOK"))
 		if err != nil {
 			return fmt.Errorf("gnss/Stm.loadAlmanac: %w", err)
 		}
@@ -679,7 +671,7 @@ get_time_loop:
 
 	fmt.Println("Module date/time is incorrect, setting to host date/time...")
 
-	_, err = s.sendCmd(nmea.New("PSTMINITTIME", []string{fmt.Sprintf("%02d,%02d,%04d,%02d,%02d,%02d",
+	_, err = s.write(nmea.New("PSTMINITTIME", []string{fmt.Sprintf("%02d,%02d,%04d,%02d,%02d,%02d",
 		now.Day(),
 		now.Month(),
 		now.Year(),
