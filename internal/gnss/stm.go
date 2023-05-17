@@ -147,6 +147,14 @@ func NewStmGnss(path string, debug bool) *StmDevice {
 	}
 
 	s.ready = func(t time.Duration) error {
+		// Send the command to resume just in case the module is in a suspended
+		// state
+		if s.debug {
+			fmt.Println("stm.ready: sending resume")
+		}
+		// send resume in case the device is suspended
+		s.resume()
+
 		// device sends this message when it has booted
 		resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
 
