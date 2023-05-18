@@ -26,7 +26,6 @@ type GnssDriver interface {
 type Gnss struct {
 	dataTopic  string
 	driver     GnssDriver
-	quit       chan struct{} // TODO: what do to about this quit chan?
 	driverStop chan struct{}
 	mu         sync.Mutex
 	bus        *pubsub.PubSub
@@ -38,7 +37,6 @@ func New(driver GnssDriver) (*Gnss, error) {
 		// avoid collisions, which are likely to be rare anyways.
 		dataTopic: fmt.Sprint(time.Now()),
 		driver:    driver,
-		quit:      make(chan struct{}),
 		bus:       pubsub.New(pubsub.DefaultBufferSize),
 	}, nil
 }
