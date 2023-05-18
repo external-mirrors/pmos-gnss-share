@@ -192,7 +192,7 @@ func (s *StmDevice) readlines(device io.Reader, stopCh <-chan struct{}) {
 				s.mu.Lock()
 				scanner.Scan()
 				s.mu.Unlock()
-				line := bytes.TrimSpace(scanner.Bytes())
+				line := append(scanner.Bytes(), 0x0D, 0x0A)
 				if err := scanner.Err(); err != nil {
 					return
 				}
@@ -435,7 +435,7 @@ func (s *StmDevice) saveEphemeris(path string) (err error) {
 
 	for _, l := range out {
 		if strings.HasPrefix(l, "$PSTMEPHEM,") {
-			fmt.Fprintf(fd, "%s\n", l)
+			fmt.Fprintf(fd, "%s", l)
 		}
 	}
 	return
@@ -463,7 +463,7 @@ func (s *StmDevice) saveAlamanac(path string) (err error) {
 
 	for _, l := range out {
 		if strings.HasPrefix(l, "$PSTMALMANAC,") {
-			fmt.Fprintf(fd, "%s\n", l)
+			fmt.Fprintf(fd, "%s", l)
 		}
 	}
 	return
@@ -511,7 +511,7 @@ timeout_loop:
 		select {
 		case line := <-sub.Messages:
 			if s.debug {
-				fmt.Printf("read: %s\n", line)
+				fmt.Printf("read: %s", line)
 			}
 			// Command it echo'd back when it is complete.
 			if bytes.Contains(line, ackResponse) {
