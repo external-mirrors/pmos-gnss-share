@@ -28,17 +28,15 @@ import (
 const internalTopic = "stm_internal"
 
 type StmDevice struct {
-	path   string
-	device io.ReadWriteCloser
-	ref    common.Reference
-	debug  bool
-	mu     sync.Mutex
-
-	stopScan chan struct{}
-
+	device     io.ReadWriteCloser
+	stopScan   chan struct{}
 	openDevice func() (io.ReadWriteCloser, error)
 	ready      func(time.Duration) error
 	bus        *pubsub.PubSub
+	path       string
+	ref        common.Reference
+	mu         sync.Mutex
+	debug      bool
 }
 
 func NewStmSerial(path string, baud int, debug bool) *StmDevice {

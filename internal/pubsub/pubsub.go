@@ -24,16 +24,15 @@ type ErrNotSubscribed struct{}
 func (e *ErrNotSubscribed) Error() string { return "not subscribed to topic" }
 
 type PubSub struct {
+	topics     map[string]([]chan []byte)
 	bufferSize int
 	mu         sync.RWMutex
-	topics     map[string]([]chan []byte)
 }
 
 type Subscription struct {
-	Topic string
-	// Unsubscribe the given subscription channel from the given topic.
 	Unsubscribe func() error
 	Messages    <-chan []byte
+	Topic       string
 }
 
 const DefaultBufferSize int = 4096

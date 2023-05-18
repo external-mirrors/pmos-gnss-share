@@ -24,11 +24,11 @@ type GnssDriver interface {
 }
 
 type Gnss struct {
-	dataTopic  string
 	driver     GnssDriver
 	driverStop chan struct{}
-	mu         sync.Mutex
 	bus        *pubsub.PubSub
+	dataTopic  string
+	mu         sync.Mutex
 }
 
 func New(driver GnssDriver) (*Gnss, error) {

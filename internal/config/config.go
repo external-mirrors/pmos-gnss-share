@@ -15,8 +15,8 @@ type Config struct {
 	OwnerGroup string `toml:"group"`
 	Driver     string `toml:"device_driver"`
 	DevicePath string `toml:"device_path"`
-	BaudRate   int    `toml:"device_baud_rate"`
 	CachePath  string `toml:"agps_directory"`
+	BaudRate   int    `toml:"device_baud_rate"`
 }
 
 func Parse(file string) (c *Config, err error) {

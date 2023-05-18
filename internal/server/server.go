@@ -17,9 +17,9 @@ import (
 )
 
 type Server struct {
+	sock      net.Listener
 	socket    string
 	sockGroup string
-	sock      net.Listener
 }
 
 // New initializes a new Server. socket is the path to the unix socket that the
