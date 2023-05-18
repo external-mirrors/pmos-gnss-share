@@ -13,7 +13,6 @@ import (
 
 	"gitlab.com/postmarketOS/gnss-share/internal/config"
 	"gitlab.com/postmarketOS/gnss-share/internal/gnss"
-	"gitlab.com/postmarketOS/gnss-share/internal/pool"
 	"gitlab.com/postmarketOS/gnss-share/internal/server"
 )
 
@@ -59,6 +58,10 @@ func main() {
 	case "stm_serial":
 		driver = gnss.NewStmSerial(conf.DevicePath, conf.BaudRate, debug)
 	}
+	gnssDevice, err := gnss.New(driver)
+	if err != nil {
+		log.Fatal()
+	}
 
 	switch cmd := flag.Arg(0); cmd {
 	case "store":
@@ -85,21 +88,6 @@ func main() {
 	quitChan := make(chan struct{})
 	defer close(quitChan)
 
-	// connection broadcast pool
-	connPool := pool.New(quitChan)
-	go connPool.Start()
-
-	// channels for starting/stopping the driver
-	stopChan := make(chan bool)
-	startChan := make(chan bool)
-	errChan := make(chan error)
-
-	go func() {
-		for range startChan {
-			go driver.Start(connPool.Broadcast, stopChan, errChan)
-		}
-	}()
-
 	// start signal handler
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGUSR1, syscall.SIGUSR2)
@@ -124,21 +112,9 @@ func main() {
 		}
 	}()
 
-	s := server.New(conf.Socket, conf.OwnerGroup, startChan, stopChan, connPool)
+	s := server.New(conf.Socket, conf.OwnerGroup)
 
-	// Start monitoring for errors
-	go func() {
-		for {
-			select {
-			case <-quitChan:
-				return
-			case err := <-errChan:
-				fmt.Println(err)
-			}
-		}
-	}()
-
-	if err := s.Start(); err != nil {
+	if err := s.Start(gnssDevice); err != nil {
 		log.Fatal(err)
 	}
 }

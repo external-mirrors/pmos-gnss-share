@@ -21,30 +21,32 @@ import (
 	"github.com/tarm/serial"
 	"gitlab.com/postmarketOS/gnss-share/internal/gnss/common"
 	"gitlab.com/postmarketOS/gnss-share/internal/nmea"
-	"gitlab.com/postmarketOS/gnss-share/internal/pool"
+	"gitlab.com/postmarketOS/gnss-share/internal/pubsub"
 )
 
-type Stm struct {
+// Internal pubsub topic, could be made dynamic later if necessary...
+const internalTopic = "stm_internal"
+
+type StmDevice struct {
 	path   string
 	device io.ReadWriteCloser
 	ref    common.Reference
 	debug  bool
 	mu     sync.Mutex
 
-	stopScan       chan struct{}
-	readerPool     *pool.Pool
-	readerPoolDone <-chan struct{}
+	stopScan chan struct{}
 
 	openDevice func() (io.ReadWriteCloser, error)
 	ready      func(time.Duration) error
+	bus        *pubsub.PubSub
 }
 
-func NewStmSerial(path string, baud int, debug bool) *Stm {
-	s := Stm{
-		path:           path,
-		debug:          debug,
-		stopScan:       nil,
-		readerPoolDone: make(chan struct{}),
+func NewStmSerial(path string, baud int, debug bool) *StmDevice {
+	s := StmDevice{
+		bus:      pubsub.New(pubsub.DefaultBufferSize),
+		debug:    debug,
+		path:     path,
+		stopScan: nil,
 	}
 
 	s.openDevice = func() (io.ReadWriteCloser, error) {
@@ -54,14 +56,11 @@ func NewStmSerial(path string, baud int, debug bool) *Stm {
 		})
 	}
 	s.ready = func(t time.Duration) error { return nil }
-	s.readerPool = pool.New(s.readerPoolDone)
-	go s.readerPool.Start()
-	// TODO: add a stop method for Pool?
 
 	return &s
 }
 
-func (s *Stm) open() error {
+func (s *StmDevice) open() error {
 	s.ref.Add()
 	if s.ref.Count() > 1 {
 		return nil
@@ -75,7 +74,17 @@ func (s *Stm) open() error {
 		s.mu.Unlock()
 		return err
 	}
-	s.stopScan = s.startScan(s.device)
+
+	if s.stopScan != nil {
+		// shouldn't get here... but just in case...
+		fmt.Println("stm received a request to start but it seems to already be started...")
+		s.mu.Unlock()
+		return nil
+	}
+
+	s.stopScan = make(chan struct{})
+	go s.readlines(s.device, s.stopScan)
+
 	s.mu.Unlock()
 	// End Protected Section
 
@@ -94,7 +103,7 @@ func (s *Stm) open() error {
 	return nil
 }
 
-func (s *Stm) close() error {
+func (s *StmDevice) close() error {
 	s.ref.Remove()
 
 	if s.ref.Count() >= 1 {
@@ -116,15 +125,13 @@ func (s *Stm) close() error {
 	return nil
 }
 
-func NewStmGnss(path string, debug bool) *Stm {
-	s := Stm{
-		path:           path,
-		debug:          debug,
-		stopScan:       nil,
-		readerPoolDone: make(chan struct{}),
+func NewStmGnss(path string, debug bool) *StmDevice {
+	s := StmDevice{
+		bus:      pubsub.New(pubsub.DefaultBufferSize),
+		debug:    debug,
+		path:     path,
+		stopScan: nil,
 	}
-	s.readerPool = pool.New(s.readerPoolDone)
-	go s.readerPool.Start()
 
 	s.openDevice = func() (io.ReadWriteCloser, error) {
 		// Using syscall.Open will open the file in non-pollable mode, which
@@ -143,20 +150,20 @@ func NewStmGnss(path string, debug bool) *Stm {
 		// device sends this message when it has booted
 		resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
 
-		r, err := common.NewReader(s.readerPool, s.open, s.close)
+		sub, err := s.bus.Subscribe(internalTopic)
 		if err != nil {
-			return err
+			return fmt.Errorf("stm unable to subscribe to internal topics: %w", err)
 		}
-		defer r.Close()
+		defer sub.Unsubscribe()
 
 		for {
 			select {
-			case line := <-r.Read:
+			case line := <-sub.Messages:
 				if bytes.Contains(line, resp) {
 					return nil
 				}
 			case <-time.After(t):
-				return fmt.Errorf("stm: timed out waiting for device to become ready")
+				return fmt.Errorf("gnss/StmDevice.ready: timed out waiting for device")
 			}
 		}
 	}
@@ -164,16 +171,8 @@ func NewStmGnss(path string, debug bool) *Stm {
 	return &s
 }
 
-func (s *Stm) readlines(device io.Reader) (sendCh chan []byte, errCh chan error, stopCh chan struct{}) {
-	stopCh = make(chan struct{})
-	sendCh = make(chan []byte)
-	errCh = make(chan error)
-
+func (s *StmDevice) readlines(device io.Reader, stopCh <-chan struct{}) {
 	go func() {
-		var line []byte
-
-		defer close(sendCh)
-		defer close(errCh)
 
 		scanner := bufio.NewScanner(device)
 
@@ -182,83 +181,61 @@ func (s *Stm) readlines(device io.Reader) (sendCh chan []byte, errCh chan error,
 			case <-stopCh:
 				return
 			default:
+				s.mu.Lock()
 				scanner.Scan()
-				line = bytes.TrimSpace(scanner.Bytes())
-				err := scanner.Err()
-				if err != nil {
-					// don't block on sending errors
-					select {
-					case errCh <- err:
-					default:
-					}
+				s.mu.Unlock()
+				line := bytes.TrimSpace(scanner.Bytes())
+				if err := scanner.Err(); err != nil {
 					return
 				}
 
 				if len(line) == 0 {
-					return
+					continue
 				}
 
-				select {
-				case sendCh <- append([]byte{}, line...):
-				default:
-				}
+				// Note: this forces a new allocation of the line, so it's not race-y
+				s.bus.Publish(internalTopic, append([]byte{}, line...))
 			}
 		}
 	}()
-
-	return
 }
 
-func (s *Stm) startScan(device io.Reader) (stopScan chan struct{}) {
-	recvCh, errCh, stopReadlinesCh := s.readlines(device)
-	stopScan = make(chan struct{})
+func (s *StmDevice) Start(send func(data []byte), stop <-chan struct{}) error {
+	if err := s.open(); err != nil {
+		return fmt.Errorf("stm unable to open device: %w", err)
+	}
+
+	sub, err := s.bus.Subscribe(internalTopic)
+	if err != nil {
+		return fmt.Errorf("stm unable to start: %w", err)
+	}
 
 	go func() {
-		defer close(stopReadlinesCh)
+		defer func() {
+			s.close()
+			sub.Unsubscribe()
+		}()
+
+		// TODO: allow disabling this in config:
+		if err := s.setTime(); err != nil {
+			fmt.Println("error: stm unable to set time:", err)
+			return
+		}
 
 		for {
 			select {
-			case <-stopScan:
-				// TODO:
+			case <-stop:
 				return
-			case line := <-recvCh:
-				// TODO: this could be blocking?
-				s.readerPool.Broadcast <- line
-			case err := <-errCh:
-				if err != nil {
-					fmt.Printf("ERROR: startScan: %s\n", err)
-				}
+			case line := <-sub.Messages:
+				send(line)
 			}
 		}
 	}()
 
-	return
+	return nil
 }
 
-func (s *Stm) Start(sendCh chan<- []byte, stop <-chan bool, errCh chan<- error) {
-	// TODO: allow disabling this in config:
-	if err := s.setTime(); err != nil {
-		errCh <- fmt.Errorf("gnss/stm.Start: %w", err)
-		return
-	}
-
-	r, err := common.NewReader(s.readerPool, s.open, s.close)
-	if err != nil {
-		errCh <- err
-	}
-	defer r.Close()
-
-	for {
-		select {
-		case <-stop:
-			return
-		case line := <-r.Read:
-			sendCh <- line
-		}
-	}
-}
-
-func (s *Stm) Save(dir string) (err error) {
+func (s *StmDevice) Save(dir string) (err error) {
 	s.open()
 	defer s.close()
 
@@ -280,7 +257,7 @@ func (s *Stm) Save(dir string) (err error) {
 	return
 }
 
-func (s *Stm) Load(dir string) (err error) {
+func (s *StmDevice) Load(dir string) (err error) {
 	s.open()
 	defer s.close()
 
@@ -300,7 +277,7 @@ func (s *Stm) Load(dir string) (err error) {
 // GetParam returns the parameter value for the given CDB ID. See the STM Teseo
 // Liv3f gps software manual sections for PSTMSETPAR and relevant CBD for
 // possible IDs/values to use.
-func (s *Stm) GetParam(cdbId int) (val uint64, err error) {
+func (s *StmDevice) GetParam(cdbId int) (val uint64, err error) {
 	if err = s.open(); err != nil {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
@@ -355,7 +332,7 @@ func (s *Stm) GetParam(cdbId int) (val uint64, err error) {
 // SetParam sets parameters in the given configuration data block. See the STM
 // Teseo Liv3f gps software manual sections for PSTMSETPAR and relevant CBD for
 // possible IDs/values to use.
-func (s *Stm) SetParam(cdbId int, value uint64) (err error) {
+func (s *StmDevice) SetParam(cdbId int, value uint64) (err error) {
 	if err = s.open(); err != nil {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
@@ -396,7 +373,7 @@ func (s *Stm) SetParam(cdbId int, value uint64) (err error) {
 	return
 }
 
-func (s *Stm) Reset() (err error) {
+func (s *StmDevice) Reset() (err error) {
 	if err = s.open(); err != nil {
 		err = fmt.Errorf("gnss/stmCommon.Reset: %w", err)
 		return
@@ -408,7 +385,7 @@ func (s *Stm) Reset() (err error) {
 	return
 }
 
-func (s *Stm) Restore() (err error) {
+func (s *StmDevice) Restore() (err error) {
 	if err = s.open(); err != nil {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
@@ -427,7 +404,7 @@ func (s *Stm) Restore() (err error) {
 	return
 }
 
-func (s *Stm) saveEphemeris(path string) (err error) {
+func (s *StmDevice) saveEphemeris(path string) (err error) {
 	fmt.Printf("Storing ephemerides to: %q\n", path)
 
 	err = s.pause()
@@ -456,7 +433,7 @@ func (s *Stm) saveEphemeris(path string) (err error) {
 	return
 }
 
-func (s *Stm) saveAlamanac(path string) (err error) {
+func (s *StmDevice) saveAlamanac(path string) (err error) {
 	fmt.Printf("Storing almanac to: %q\n", path)
 
 	err = s.pause()
@@ -488,12 +465,13 @@ func (s *Stm) saveAlamanac(path string) (err error) {
 // comparing ackResponse to the data it receives from the module (if
 // ackResponse is not empty). An error is returned if ackResponse is not empty
 // and it fails to find a match before it times out.
-func (s *Stm) write(cmd []byte, ackResponse []byte) (out []string, err error) {
-	r, err := common.NewReader(s.readerPool, s.open, s.close)
+func (s *StmDevice) write(cmd []byte, ackResponse []byte) (out []string, err error) {
+	sub, err := s.bus.Subscribe(internalTopic)
 	if err != nil {
-		return out, err
+		return out, fmt.Errorf("stm unable to subscribe to internal topic: %w", err)
 	}
-	defer r.Close()
+	defer sub.Unsubscribe()
+
 	cmd = bytes.TrimSpace(cmd)
 	if s.debug {
 		fmt.Println("write: ", string(cmd))
@@ -523,7 +501,7 @@ func (s *Stm) write(cmd []byte, ackResponse []byte) (out []string, err error) {
 timeout_loop:
 	for {
 		select {
-		case line := <-r.Read:
+		case line := <-sub.Messages:
 			if s.debug {
 				fmt.Printf("read: %s\n", line)
 			}
@@ -540,7 +518,7 @@ timeout_loop:
 	return
 }
 
-func (s *Stm) pause() (err error) {
+func (s *StmDevice) pause() (err error) {
 	_, err = s.write(nmea.New("PSTMGPSSUSPEND", []string{}), nil)
 	if err != nil {
 		return fmt.Errorf("gnss/Stm.pause: %w", err)
@@ -549,7 +527,7 @@ func (s *Stm) pause() (err error) {
 	return
 }
 
-func (s *Stm) resume() (err error) {
+func (s *StmDevice) resume() (err error) {
 	_, err = s.write(nmea.New("PSTMGPSRESTART", []string{}), nil)
 	if err != nil {
 		return fmt.Errorf("gnss/Stm.pause: %w", err)
@@ -558,7 +536,7 @@ func (s *Stm) resume() (err error) {
 	return
 }
 
-func (s *Stm) loadEphemeris(path string) (err error) {
+func (s *StmDevice) loadEphemeris(path string) (err error) {
 	fd, err := os.Open(path)
 	if err != nil {
 		err = fmt.Errorf("gnss/Stm.loadEphemeris: %w", err)
@@ -589,7 +567,7 @@ func (s *Stm) loadEphemeris(path string) (err error) {
 	return
 }
 
-func (s *Stm) loadAlmanac(path string) (err error) {
+func (s *StmDevice) loadAlmanac(path string) (err error) {
 	fd, err := os.Open(path)
 	if err != nil {
 		err = fmt.Errorf("gnss/Stm.loadAlmanac: %w", err)
@@ -622,21 +600,21 @@ func (s *Stm) loadAlmanac(path string) (err error) {
 }
 
 // Set the time for the module if it deviates from host/OS time.
-func (s *Stm) setTime() (err error) {
+func (s *StmDevice) setTime() error {
 	fmt.Println("Checking date/time on module...")
 	var rawTime, rawDate string
 
-	r, err := common.NewReader(s.readerPool, s.open, s.close)
+	sub, err := s.bus.Subscribe(internalTopic)
 	if err != nil {
-		return
+		return fmt.Errorf("stm unable to subscribe to internal topic: %w", err)
 	}
-	defer r.Close()
+	defer sub.Unsubscribe()
 	timeout := time.After(5 * time.Second)
 
 get_time_loop:
 	for {
 		select {
-		case line := <-r.Read:
+		case line := <-sub.Messages:
 			// RMC contains both date and time from the module
 			if len(line) > 7 && !bytes.Equal(line[:6], []byte("$GPRMC")) {
 				continue
@@ -659,15 +637,14 @@ get_time_loop:
 
 	moduleTime, err := time.Parse("020106150405", rawDate+rawTime)
 	if err != nil {
-		err = fmt.Errorf("stm/setTime: %w", err)
-		return
+		return fmt.Errorf("stm/setTime: %w", err)
 	}
 
 	// Only update date/time on module if it's more than 30 seconds off
 	now := time.Now().UTC()
 	diff := now.Sub(moduleTime)
 	if math.Abs(diff.Seconds()) < 30.0 {
-		return
+		return nil
 	}
 
 	fmt.Println("Module date/time is incorrect, setting to host date/time...")
@@ -681,9 +658,8 @@ get_time_loop:
 		now.Second(),
 	)}), []byte("INITTIME"))
 	if err != nil {
-		err = fmt.Errorf("stm/setTime: %w", err)
-		return
+		return fmt.Errorf("stm/setTime: %w", err)
 	}
 
-	return
+	return nil
 }

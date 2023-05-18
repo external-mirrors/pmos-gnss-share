@@ -4,6 +4,7 @@
 package server
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"net"
@@ -12,34 +13,32 @@ import (
 	"strconv"
 	"time"
 
-	"gitlab.com/postmarketOS/gnss-share/internal/pool"
+	"gitlab.com/postmarketOS/gnss-share/internal/pubsub"
 )
 
 type Server struct {
 	socket    string
 	sockGroup string
-	connPool  *pool.Pool
 	sock      net.Listener
-	startChan chan<- bool
-	stopChan  chan<- bool
 }
 
-// Create a new Server. The server will send 'true' to startChan when the first
-// client connects, and 'true' to stopChan when the last client disconnects.
-// Messages received from the connPool are forwarded to the connected clients.
-func New(socket string, sockGroup string, startChan chan<- bool, stopChan chan<- bool, connPool *pool.Pool) (s *Server) {
+// New initializes a new Server. socket is the path to the unix socket that the
+// server will create and listen on, and sockGroup is the group owner for the
+// socket.
+func New(socket string, sockGroup string) (s *Server) {
 	s = &Server{
 		socket:    socket,
 		sockGroup: sockGroup,
-		startChan: startChan,
-		stopChan:  stopChan,
-		connPool:  connPool,
 	}
 
 	return
 }
 
-func (s *Server) Start() (err error) {
+func (s *Server) Stop() {
+	s.sock.Close()
+}
+
+func (s *Server) Start(subscriber pubsub.Subscriber) (err error) {
 	if err := os.RemoveAll(s.socket); err != nil {
 		return fmt.Errorf("startServer(): %w", err)
 	}
@@ -68,73 +67,71 @@ func (s *Server) Start() (err error) {
 		return fmt.Errorf("startServer(): %w", err)
 	}
 
-	// connection handler
-	fmt.Printf("Starting GNSS server, accepting connections at: %s\n", s.socket)
+	fmt.Println("Starting GNSS server, accepting connections at: ", s.socket)
 
-	s.connectionHandler()
-	return nil
-}
-
-func (s *Server) connectionHandler() error {
 	for {
-		conn, err := (s.sock).Accept()
-		if err != nil {
-			return fmt.Errorf("server.connectionHandler: %w", err)
+		if conn, err := (s.sock).Accept(); err != nil {
+			fmt.Println("server: connection accept failed: ", err)
+			continue
+		} else {
+			go func() {
+				if sub, err := subscriber.Subscribe(); err != nil {
+					fmt.Println("server: unable to subscribe to topic: ", err)
+				} else {
+					s.clientConnection(conn, sub)
+				}
+			}()
 		}
-
-		client := pool.Client{
-			Send: make(chan []byte, 1),
-		}
-
-		if s.connPool.Count() == 0 {
-			// client is first one in the connPool
-			s.startChan <- true
-		}
-
-		s.connPool.Register <- &client
-
-		go s.clientConnection(&client, &conn)
-
-		fmt.Println("New client connected")
-
 	}
 }
 
 // Routine run for each client connection
-func (s *Server) clientConnection(c *pool.Client, conn *net.Conn) {
+func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription) {
+
 	defer func() {
-		s.connPool.Unregister <- c
-		(*conn).Close()
+		conn.Close()
+		if err := sub.Unsubscribe(); err != nil {
+			fmt.Println("server: connection unsubscribe failed: ", err)
+		}
 	}()
 
-	var tries int
-	maxTries := 5
 	for {
-		if tries >= maxTries {
-			fmt.Println("Unix sock server: unable to send to client, disconnecting.")
-			break
+		// read all data (inluding buffered) from the channel
+		// if there's anything to send, send it
+		// don't spin in a loop, and don't use time.Sleep, it should block on channel read
+
+		// TODO: this is allocating on *every* iteration... what's a good way
+		// to re-use this slice?
+		msg, ok := <-sub.Messages
+		if !ok {
+			fmt.Println("closing connection: unable to read from client subscription channel")
+			return
 		}
-		msg := <-c.Send
-		(*conn).SetWriteDeadline(time.Now().Add(1 * time.Second))
-		if _, err := (*conn).Write(append(msg, byte('\n'))); err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				fmt.Printf("Unix sock server: timeout trying to send line to client, retrying (%d of %d)...\n", tries+1, maxTries)
-				tries++
-				continue
+		// This receive loop will slurp up any data that is in the channel
+		// buffers
+	receive_loop:
+		for {
+			select {
+			case data := <-sub.Messages:
+				msg = append(msg, data...)
+			default:
+				break receive_loop
 			}
-			// client disconnected
-			break
+		}
+		if bytes.Equal(msg, []byte{}) {
+			continue
 		}
 
-		// successful send, reset tries counter
-		tries = 0
-	}
-
-	// client disconnected
-	fmt.Printf("Client disconnected (%d remaining)\n", s.connPool.Count()-1)
-	if s.connPool.Count() == 1 {
-		// client is last one in the pool
-		fmt.Println("No clients connected, closing GNSS")
-		s.stopChan <- true
+		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if _, err := conn.Write(msg); err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				// Client hasn't read in a long time, so just bail for now. Maybe
+				// later this could retry a few times or wait longer?
+				fmt.Println("server: client hasn't read from socket in 5s, disconnecting it")
+				return
+			}
+			fmt.Println("Client disconnected")
+			return
+		}
 	}
 }

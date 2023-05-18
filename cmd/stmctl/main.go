@@ -46,7 +46,7 @@ func main() {
 		return
 	}
 
-	var stm *gnss.Stm
+	var stm *gnss.StmDevice
 	if serial {
 		stm = gnss.NewStmSerial(devPath, baud, debug)
 	} else {
