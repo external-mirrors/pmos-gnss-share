@@ -88,6 +88,11 @@ func (g *Gnss) Subscribe() (*pubsub.Subscription, error) {
 			}
 		}, g.driverStop)
 		if err != nil {
+			// Unsubscribe so this failed attempt is not counted as an active
+			// subscription
+			if err := defaultUnsub(); err != nil {
+				fmt.Println("stm unable to unsubscribe from internal topic: ", err)
+			}
 			return nil, err
 		}
 	}
