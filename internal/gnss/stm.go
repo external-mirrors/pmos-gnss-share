@@ -53,7 +53,17 @@ func NewStmSerial(path string, baud int, debug bool) *StmDevice {
 			Baud: baud,
 		})
 	}
-	s.ready = func(t time.Duration) error { return nil }
+	s.ready = func(_ time.Duration) error {
+		// Send the command to resume just in case the module is in a suspended
+		// state
+		if s.debug {
+			fmt.Println("stm sending resume")
+		}
+		if err := s.resume(); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	return &s
 }
@@ -87,12 +97,6 @@ func (s *StmDevice) open() error {
 
 	s.mu.Unlock()
 	// End Protected Section
-
-	// Send the command to resume just in case the module is in a suspended
-	// state
-	if err := s.resume(); err != nil {
-		return err
-	}
 
 	// TODO: 3 seconds should be more than enough time for the module to boot.
 	// This is a total hack... but it's simpler than implementing a routine to
@@ -151,16 +155,6 @@ func NewStmGnss(path string, debug bool) *StmDevice {
 	}
 
 	s.ready = func(t time.Duration) error {
-		// Send the command to resume just in case the module is in a suspended
-		// state
-		if s.debug {
-			fmt.Println("stm.ready: sending resume")
-		}
-		// send resume in case the device is suspended
-		if err := s.resume(); err != nil {
-			return err
-		}
-
 		// device sends this message when it has booted
 		resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
 
@@ -448,7 +442,7 @@ func (s *StmDevice) SetParam(cdbId int, value uint64) (err error) {
 
 func (s *StmDevice) Reset() (err error) {
 	if err = s.open(); err != nil {
-		err = fmt.Errorf("gnss/stmCommon.Reset: %w", err)
+		err = fmt.Errorf("stm reset failed: %w", err)
 		return
 	}
 
@@ -458,9 +452,7 @@ func (s *StmDevice) Reset() (err error) {
 			err = cerr
 		}
 	}()
-	if err = s.pause(); err != nil {
-		return
-	}
+
 	_, err = s.write(nmea.New("PSTMSRR", []string{}), nil)
 	return
 }
