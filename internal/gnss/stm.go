@@ -93,10 +93,10 @@ func (s *StmDevice) open() error {
 	}
 
 	s.stopScan = make(chan struct{})
-	go s.readlines(s.device, s.stopScan)
-
 	s.mu.Unlock()
 	// End Protected Section
+
+	go s.readlines(s.device, s.stopScan)
 
 	// TODO: 3 seconds should be more than enough time for the module to boot.
 	// This is a total hack... but it's simpler than implementing a routine to
