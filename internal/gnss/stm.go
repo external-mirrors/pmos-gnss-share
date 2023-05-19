@@ -189,21 +189,34 @@ func NewStmGnss(path string, debug bool) *StmDevice {
 	return &s
 }
 
-func (s *StmDevice) readlines(device io.Reader, stopCh <-chan struct{}) {
+func (s *StmDevice) readlines(device io.Reader, done <-chan struct{}) {
 	go func() {
 
-		scanner := bufio.NewScanner(device)
+		// do the actual scan/read in a new goroutine, so that it's not
+		// blocking for the parent goroutine
+		lines := func() <-chan []byte {
+			out := make(chan []byte)
+			go func() {
+				defer close(out)
+				scanner := bufio.NewScanner(device)
+				for scanner.Scan() {
+					out <- append(scanner.Bytes(), 0x0D, 0x0A)
+				}
+				if err := scanner.Err(); err != nil {
+					// meh
+					return
+				}
+			}()
+			return out
+		}()
 
 		for {
 			select {
-			case <-stopCh:
+			case <-done:
 				return
-			default:
-				s.mu.Lock()
-				scanner.Scan()
-				s.mu.Unlock()
-				line := append(scanner.Bytes(), 0x0D, 0x0A)
-				if err := scanner.Err(); err != nil {
+			case line, ok := <-lines:
+				if !ok {
+					// channel closed, no longer scanning
 					return
 				}
 
