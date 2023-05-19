@@ -47,7 +47,13 @@ func (s *Server) Start(subscriber pubsub.Subscriber) (err error) {
 	if err != nil {
 		return fmt.Errorf("startServer(): %w", err)
 	}
-	defer s.sock.Close()
+
+	defer func() {
+		cerr := s.sock.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	if err := os.Chmod(s.socket, 0660); err != nil {
 		return fmt.Errorf("startServer(): %w", err)
@@ -122,7 +128,11 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription) {
 			continue
 		}
 
-		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			fmt.Println("server: client unable to set socket write deadline")
+			return
+		}
+
 		if _, err := conn.Write(msg); err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				// Client hasn't read in a long time, so just bail for now. Maybe
