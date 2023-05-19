@@ -190,47 +190,44 @@ func NewStmGnss(path string, debug bool) *StmDevice {
 }
 
 func (s *StmDevice) readlines(device io.Reader, done <-chan struct{}) {
-	go func() {
-
-		// do the actual scan/read in a new goroutine, so that it's not
-		// blocking for the parent goroutine
-		lines := func() <-chan []byte {
-			out := make(chan []byte)
-			go func() {
-				defer close(out)
-				scanner := bufio.NewScanner(device)
-				for scanner.Scan() {
-					out <- append(scanner.Bytes(), 0x0D, 0x0A)
-				}
-				if err := scanner.Err(); err != nil {
-					// meh
-					return
-				}
-			}()
-			return out
-		}()
-
-		for {
-			select {
-			case <-done:
+	// do the actual scan/read in a new goroutine, so that it's not
+	// blocking for the parent goroutine
+	lines := func() <-chan []byte {
+		out := make(chan []byte)
+		go func() {
+			defer close(out)
+			scanner := bufio.NewScanner(device)
+			for scanner.Scan() {
+				out <- append(scanner.Bytes(), 0x0D, 0x0A)
+			}
+			if err := scanner.Err(); err != nil {
+				// meh
 				return
-			case line, ok := <-lines:
-				if !ok {
-					// channel closed, no longer scanning
-					return
-				}
+			}
+		}()
+		return out
+	}()
 
-				if len(line) == 0 {
-					continue
-				}
+	for {
+		select {
+		case <-done:
+			return
+		case line, ok := <-lines:
+			if !ok {
+				// channel closed, no longer scanning
+				return
+			}
 
-				// Note: this forces a new allocation of the line, so it's not race-y
-				if err := s.bus.Publish(internalTopic, append([]byte{}, line...)); err != nil {
-					fmt.Println("stm readlines unable to publish data: ", err)
-				}
+			if len(line) == 0 {
+				continue
+			}
+
+			// Note: this forces a new allocation of the line, so it's not race-y
+			if err := s.bus.Publish(internalTopic, append([]byte{}, line...)); err != nil {
+				fmt.Println("stm readlines unable to publish data: ", err)
 			}
 		}
-	}()
+	}
 }
 
 func (s *StmDevice) Start(send func(data []byte), stop <-chan struct{}) error {
