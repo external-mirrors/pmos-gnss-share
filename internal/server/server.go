@@ -102,6 +102,8 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription) {
 		}
 	}()
 
+	fmt.Println("Client connected")
+
 	for {
 		// read all data (inluding buffered) from the channel
 		// if there's anything to send, send it
