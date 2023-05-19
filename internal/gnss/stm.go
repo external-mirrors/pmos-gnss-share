@@ -70,6 +70,8 @@ func (s *StmDevice) open() error {
 	s.device, err = s.openDevice()
 	if err != nil {
 		s.mu.Unlock()
+		// Don't hold a ref if the open failed (so that it can be retried later)
+		s.ref.Remove()
 		return err
 	}
 
@@ -97,6 +99,8 @@ func (s *StmDevice) open() error {
 	// read data from the module and look for the response that indicates it
 	// has booted. Obviously this is far from ideal though...........
 	if err := s.ready(time.Duration(3 * time.Second)); err != nil {
+		// Don't hold a ref if the open failed (so that it can be retried later)
+		s.ref.Remove()
 		return fmt.Errorf("stm device is not ready")
 	}
 
