@@ -83,6 +83,7 @@ func (s *Server) Start(subscriber pubsub.Subscriber) (err error) {
 			go func() {
 				if sub, err := subscriber.Subscribe(); err != nil {
 					fmt.Println("server: unable to subscribe to topic: ", err)
+					conn.Close()
 				} else {
 					s.clientConnection(conn, sub)
 				}
