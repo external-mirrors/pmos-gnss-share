@@ -88,7 +88,9 @@ func (s *StmDevice) open() error {
 
 	// Send the command to resume just in case the module is in a suspended
 	// state
-	s.resume()
+	if err := s.resume(); err != nil {
+		return err
+	}
 
 	// TODO: 3 seconds should be more than enough time for the module to boot.
 	// This is a total hack... but it's simpler than implementing a routine to
@@ -151,7 +153,9 @@ func NewStmGnss(path string, debug bool) *StmDevice {
 			fmt.Println("stm.ready: sending resume")
 		}
 		// send resume in case the device is suspended
-		s.resume()
+		if err := s.resume(); err != nil {
+			return err
+		}
 
 		// device sends this message when it has booted
 		resp := nmea.New("GPTXT", []string{"DEFAULT LIV CONFIGURATION"})
@@ -160,7 +164,11 @@ func NewStmGnss(path string, debug bool) *StmDevice {
 		if err != nil {
 			return fmt.Errorf("stm unable to subscribe to internal topics: %w", err)
 		}
-		defer sub.Unsubscribe()
+		defer func() {
+			if err := sub.Unsubscribe(); err != nil {
+				fmt.Println("stm unable to unsubscribe to internal topics: ", err)
+			}
+		}()
 
 		for {
 			select {
@@ -200,7 +208,9 @@ func (s *StmDevice) readlines(device io.Reader, stopCh <-chan struct{}) {
 				}
 
 				// Note: this forces a new allocation of the line, so it's not race-y
-				s.bus.Publish(internalTopic, append([]byte{}, line...))
+				if err := s.bus.Publish(internalTopic, append([]byte{}, line...)); err != nil {
+					fmt.Println("stm readlines unable to publish data: ", err)
+				}
 			}
 		}
 	}()
@@ -218,8 +228,12 @@ func (s *StmDevice) Start(send func(data []byte), stop <-chan struct{}) error {
 
 	go func() {
 		defer func() {
-			s.close()
-			sub.Unsubscribe()
+			if err := s.close(); err != nil {
+				fmt.Println("stm unable close device:", err)
+			}
+			if err := sub.Unsubscribe(); err != nil {
+				fmt.Println("stm unable to unsubscribe to internal topics: ", err)
+			}
 		}()
 
 		// TODO: allow disabling this in config:
@@ -242,8 +256,15 @@ func (s *StmDevice) Start(send func(data []byte), stop <-chan struct{}) error {
 }
 
 func (s *StmDevice) Save(dir string) (err error) {
-	s.open()
-	defer s.close()
+	if err := s.open(); err != nil {
+		return fmt.Errorf("stm unable to open device: %w", err)
+	}
+	defer func() {
+		cerr := s.close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	err = os.MkdirAll(dir, 0755)
 	if err != nil {
@@ -264,8 +285,15 @@ func (s *StmDevice) Save(dir string) (err error) {
 }
 
 func (s *StmDevice) Load(dir string) (err error) {
-	s.open()
-	defer s.close()
+	if err := s.open(); err != nil {
+		return fmt.Errorf("stm unable to open device: %w", err)
+	}
+	defer func() {
+		cerr := s.close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	err = s.loadEphemeris(filepath.Join(dir, "ephemeris.txt"))
 	if err != nil {
@@ -288,10 +316,22 @@ func (s *StmDevice) GetParam(cdbId int) (val uint64, err error) {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
 	}
-	defer s.close()
+	defer func() {
+		cerr := s.close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
-	s.pause()
-	defer s.resume()
+	if err = s.pause(); err != nil {
+		return
+	}
+	defer func() {
+		cerr := s.resume()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	// the module responds with STMSETPAR to a GETPAR command
 	out, err := s.write(nmea.New("PSTMGETPAR", []string{fmt.Sprintf("%d", cdbId)}), []byte("SETPAR"))
@@ -343,9 +383,16 @@ func (s *StmDevice) SetParam(cdbId int, value uint64) (err error) {
 		err = fmt.Errorf("gnss/stmCommon.GetParam: %w", err)
 		return
 	}
-	defer s.close()
+	defer func() {
+		cerr := s.close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
-	s.pause()
+	if err = s.pause(); err != nil {
+		return
+	}
 	// resume only on error, since system is reset on success
 
 	msgListCmd := nmea.New("PSTMSETPAR", []string{
@@ -359,20 +406,26 @@ func (s *StmDevice) SetParam(cdbId int, value uint64) (err error) {
 	out, err := s.write(msgListCmd, []byte("SETPAROK"))
 	if err != nil {
 		err = fmt.Errorf("gnss/Stm.SetParam: %w", err)
-		s.resume()
+		if err := s.resume(); err != nil {
+			fmt.Println("unable to resume: ", err)
+		}
 		return
 	}
 
 	for _, o := range out {
 		if strings.Contains(o, "PSTMSETPARERROR") {
-			s.resume()
+			if err := s.resume(); err != nil {
+				fmt.Println("unable to resume: ", err)
+			}
 			return fmt.Errorf("error setting parameter at conf block %d, id %d: %d", 1, cdbId, value)
 		}
 	}
 
 	_, err = s.write(nmea.New("PSTMSAVEPAR", []string{}), []byte("SAVEPAROK"))
 	if err != nil {
-		s.resume()
+		if err := s.resume(); err != nil {
+			fmt.Println("unable to resume: ", err)
+		}
 		return
 	}
 	_, err = s.write(nmea.New("PSTMSRR", []string{}), nil)
@@ -385,8 +438,15 @@ func (s *StmDevice) Reset() (err error) {
 		return
 	}
 
-	defer s.close()
-	s.pause()
+	defer func() {
+		cerr := s.close()
+		if err == nil {
+			err = cerr
+		}
+	}()
+	if err = s.pause(); err != nil {
+		return
+	}
 	_, err = s.write(nmea.New("PSTMSRR", []string{}), nil)
 	return
 }
@@ -397,13 +457,23 @@ func (s *StmDevice) Restore() (err error) {
 		return
 	}
 
-	defer s.close()
-	s.pause()
+	defer func() {
+		cerr := s.close()
+		if err == nil {
+			err = cerr
+		}
+	}()
+
+	if err = s.pause(); err != nil {
+		return
+	}
 	// resume only on error, since system is reset on success
 
 	_, err = s.write(nmea.New("PSTMRESTOREPAR", []string{}), []byte("RESTOREPAROK"))
 	if err != nil {
-		s.resume()
+		if err := s.resume(); err != nil {
+			fmt.Println("unable to resume: ", err)
+		}
 		return
 	}
 	_, err = s.write(nmea.New("PSTMSRR", []string{}), nil)
@@ -413,11 +483,15 @@ func (s *StmDevice) Restore() (err error) {
 func (s *StmDevice) saveEphemeris(path string) (err error) {
 	fmt.Printf("Storing ephemerides to: %q\n", path)
 
-	err = s.pause()
-	if err != nil {
+	if err = s.pause(); err != nil {
 		return
 	}
-	defer s.resume()
+	defer func() {
+		cerr := s.resume()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	out, err := s.write(nmea.New("PSTMDUMPEPHEMS", []string{}), []byte("DUMPEPHEMS"))
 	if err != nil {
@@ -429,7 +503,13 @@ func (s *StmDevice) saveEphemeris(path string) (err error) {
 		err = fmt.Errorf("gnss/Stm.Save: error saving to file %q: %w", path, err)
 		return
 	}
-	defer fd.Close()
+
+	defer func() {
+		cerr := fd.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	for _, l := range out {
 		if strings.HasPrefix(l, "$PSTMEPHEM,") {
@@ -442,11 +522,15 @@ func (s *StmDevice) saveEphemeris(path string) (err error) {
 func (s *StmDevice) saveAlamanac(path string) (err error) {
 	fmt.Printf("Storing almanac to: %q\n", path)
 
-	err = s.pause()
-	if err != nil {
+	if err = s.pause(); err != nil {
 		return
 	}
-	defer s.resume()
+	defer func() {
+		cerr := s.resume()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	out, err := s.write(nmea.New("PSTMDUMPALMANAC", []string{}), []byte("DUMPALMANAC"))
 	if err != nil {
@@ -457,7 +541,12 @@ func (s *StmDevice) saveAlamanac(path string) (err error) {
 	if err != nil {
 		return fmt.Errorf("gnss/Stm.saveAlamanac: error saving to file %q: %w", path, err)
 	}
-	defer fd.Close()
+	defer func() {
+		cerr := fd.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	for _, l := range out {
 		if strings.HasPrefix(l, "$PSTMALMANAC,") {
@@ -476,7 +565,11 @@ func (s *StmDevice) write(cmd []byte, ackResponse []byte) (out []string, err err
 	if err != nil {
 		return out, fmt.Errorf("stm unable to subscribe to internal topic: %w", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		if err := sub.Unsubscribe(); err != nil {
+			fmt.Println("stm unable to unsubscribe to internal topics: ", err)
+		}
+	}()
 
 	cmd = bytes.TrimSpace(cmd)
 	if s.debug {
@@ -548,13 +641,22 @@ func (s *StmDevice) loadEphemeris(path string) (err error) {
 		err = fmt.Errorf("gnss/Stm.loadEphemeris: %w", err)
 		return
 	}
-	defer fd.Close()
+	defer func() {
+		cerr := fd.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
-	err = s.pause()
-	if err != nil {
+	if err = s.pause(); err != nil {
 		return
 	}
-	defer s.resume()
+	defer func() {
+		cerr := s.resume()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	var lines [][]byte
 	scanner := bufio.NewScanner(fd)
@@ -579,13 +681,22 @@ func (s *StmDevice) loadAlmanac(path string) (err error) {
 		err = fmt.Errorf("gnss/Stm.loadAlmanac: %w", err)
 		return
 	}
-	defer fd.Close()
+	defer func() {
+		cerr := fd.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
-	err = s.pause()
-	if err != nil {
+	if err = s.pause(); err != nil {
 		return
 	}
-	defer s.resume()
+	defer func() {
+		cerr := s.resume()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	var lines [][]byte
 
@@ -614,7 +725,11 @@ func (s *StmDevice) setTime() error {
 	if err != nil {
 		return fmt.Errorf("stm unable to subscribe to internal topic: %w", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		if err := sub.Unsubscribe(); err != nil {
+			fmt.Println("stm unable to unsubscribe to internal topics: ", err)
+		}
+	}()
 	timeout := time.After(5 * time.Second)
 
 get_time_loop:
