@@ -114,7 +114,9 @@ func main() {
 
 	s := server.New(conf.Socket, conf.OwnerGroup)
 
-	if err := s.Start(gnssDevice); err != nil {
+	// Note: gnssDevice implements both interfaces.
+	// TODO: one day this will be a ReadWriter
+	if err := s.Start(gnssDevice, gnssDevice); err != nil {
 		log.Fatal(err)
 	}
 }

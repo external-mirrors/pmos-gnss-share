@@ -224,7 +224,7 @@ func (s *StmDevice) readlines(device io.Reader, done <-chan struct{}) {
 	}
 }
 
-func (s *StmDevice) Start(send func(data []byte), stop <-chan struct{}) error {
+func (s *StmDevice) Start(send func(data []byte), write <-chan []byte, stop <-chan struct{}) error {
 	if err := s.open(); err != nil {
 		return fmt.Errorf("stm unable to open device: %w", err)
 	}
@@ -250,6 +250,11 @@ func (s *StmDevice) Start(send func(data []byte), stop <-chan struct{}) error {
 				return
 			case line := <-sub.Messages:
 				send(line)
+			case msg := <-write:
+				if _, err := s.write(msg, []byte{}); err != nil {
+					fmt.Println("stm message received for forwarding:", string(msg))
+					fmt.Println("stm unable to forward received message to device:", err)
+				}
 			}
 		}
 	}()

@@ -20,7 +20,7 @@ const (
 type GnssDriver interface {
 	Load(dir string) error
 	Save(dir string) error
-	Start(send func(data []byte), stop <-chan struct{}) error
+	Start(send func(data []byte), write <-chan []byte, stop <-chan struct{}) error
 }
 
 type Gnss struct {
@@ -28,14 +28,16 @@ type Gnss struct {
 	driverStop chan struct{}
 	bus        *pubsub.PubSub
 	dataTopic  string
+	writeTopic string
 	mu         sync.Mutex
 }
 
 func New(driver GnssDriver) (*Gnss, error) {
 	return &Gnss{
-		dataTopic: uuid.NewString(),
-		driver:    driver,
-		bus:       pubsub.New(pubsub.DefaultBufferSize),
+		dataTopic:  uuid.NewString(),
+		writeTopic: uuid.NewString(),
+		driver:     driver,
+		bus:        pubsub.New(pubsub.DefaultBufferSize),
 	}, nil
 }
 
@@ -82,6 +84,11 @@ func (g *Gnss) Subscribe() (*pubsub.Subscription, error) {
 		return nil
 	}
 
+	pub, err := g.bus.Subscribe(g.writeTopic)
+	if err != nil {
+		return nil, err
+	}
+
 	// Start the driver if this is the first subscription
 	if g.bus.Subscribers(g.dataTopic) == 1 {
 		g.mu.Lock()
@@ -89,11 +96,12 @@ func (g *Gnss) Subscribe() (*pubsub.Subscription, error) {
 		g.driverStop = make(chan struct{})
 		// This abstracts publishing to the pubsub topic so that drivers don't
 		// have to deal with pubsub if they don't want to.
+		// This also hooks up the pub messages to the driver.
 		err := g.driver.Start(func(data []byte) {
 			if err := g.bus.Publish(g.dataTopic, data); err != nil {
 				fmt.Printf("error: unable to send data to %q: %s\n", g.dataTopic, data)
 			}
-		}, g.driverStop)
+		}, pub.Messages, g.driverStop)
 		if err != nil {
 			// Unsubscribe so this failed attempt is not counted as an active
 			// subscription

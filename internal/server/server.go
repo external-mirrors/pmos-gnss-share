@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/user"
@@ -38,7 +39,7 @@ func (s *Server) Stop() {
 	s.sock.Close()
 }
 
-func (s *Server) Start(subscriber pubsub.Subscriber) (err error) {
+func (s *Server) Start(subscriber pubsub.Subscriber, publisher io.Writer) (err error) {
 	if err := os.RemoveAll(s.socket); err != nil {
 		return fmt.Errorf("startServer(): %w", err)
 	}
@@ -85,7 +86,7 @@ func (s *Server) Start(subscriber pubsub.Subscriber) (err error) {
 					fmt.Println("server: unable to subscribe to topic: ", err)
 					conn.Close()
 				} else {
-					s.clientConnection(conn, sub)
+					s.clientConnection(conn, sub, publisher)
 				}
 			}()
 		}
@@ -93,9 +94,12 @@ func (s *Server) Start(subscriber pubsub.Subscriber) (err error) {
 }
 
 // Routine run for each client connection
-func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription) {
+func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription, pub io.Writer) {
 
 	defer func() {
+		// Note: close() could potentially be called twice, e.g. once on socket
+		// read failure and again here, however upon inspection of the Go
+		// implementation for net.Conn.UnixConn this doesn't seem to matter...
 		conn.Close()
 		fmt.Println("Client disconnected")
 		if err := sub.Unsubscribe(); err != nil {
@@ -105,17 +109,49 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription) {
 
 	fmt.Println("Client connected")
 
+	// This "read" goroutine conveniently serves as a trigger for when the client
+	// closes the connection. Without it, the "write" for loop later will hang
+	// indefinitely if no data is sent to the subscription channel. The "done"
+	// chan is closed when this "read" goroutine returns, which will happen if
+	// the client disconnects.
+	done := make(chan struct{})
+	go func() {
+		defer conn.Close()
+		defer close(done)
+
+		for {
+			buf := make([]byte, 1024)
+			size, err := conn.Read(buf)
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					fmt.Println("server: unable to read from socket: ", err)
+				}
+				return
+			}
+			if size == 0 {
+				continue
+			}
+			if _, err := pub.Write(buf); err != nil {
+				fmt.Println("server: unable to send received data to sub: ", err)
+			}
+		}
+	}()
+
 	for {
 		// read all data (inluding buffered) from the channel
 		// if there's anything to send, send it
 		// don't spin in a loop, and don't use time.Sleep, it should block on channel read
 
-		// TODO: this is allocating on *every* iteration... what's a good way
-		// to re-use this slice?
-		msg, ok := <-sub.Messages
-		if !ok {
-			fmt.Println("server: unable to read from client subscription channel")
+		var msg []byte
+		select {
+		case <-done:
 			return
+		case data, ok := <-sub.Messages:
+			if !ok {
+				fmt.Println("server: unable to read from client subscription channel")
+				return
+			}
+			msg = data
 		}
 		// This receive loop will slurp up any data that is in the channel
 		// buffers
@@ -124,6 +160,8 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription) {
 			select {
 			case data := <-sub.Messages:
 				msg = append(msg, data...)
+			case <-done:
+				return
 			default:
 				break receive_loop
 			}
