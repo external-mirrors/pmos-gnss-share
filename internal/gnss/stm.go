@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -243,12 +242,6 @@ func (s *StmDevice) Start(send func(data []byte), stop <-chan struct{}) error {
 				fmt.Println("stm unable to unsubscribe to internal topics: ", err)
 			}
 		}()
-
-		// TODO: allow disabling this in config:
-		if err := s.setTime(); err != nil {
-			fmt.Println("error: stm unable to set time:", err)
-			return
-		}
 
 		for {
 			select {
@@ -720,73 +713,4 @@ func (s *StmDevice) loadAlmanac(path string) (err error) {
 	}
 
 	return
-}
-
-// Set the time for the module if it deviates from host/OS time.
-func (s *StmDevice) setTime() error {
-	fmt.Println("Checking date/time on module...")
-	var rawTime, rawDate string
-
-	sub, err := s.bus.Subscribe(internalTopic)
-	if err != nil {
-		return fmt.Errorf("stm unable to subscribe to internal topic: %w", err)
-	}
-	defer func() {
-		if err := sub.Unsubscribe(); err != nil {
-			fmt.Println("stm unable to unsubscribe to internal topics: ", err)
-		}
-	}()
-	timeout := time.After(5 * time.Second)
-
-get_time_loop:
-	for {
-		select {
-		case line := <-sub.Messages:
-			// RMC contains both date and time from the module
-			if len(line) > 7 && !bytes.Equal(line[:6], []byte("$GPRMC")) {
-				continue
-			}
-
-			parts := bytes.Split(line, []byte(","))
-			if len(parts) < 10 {
-				// malformed RMC sentence
-				continue
-			}
-
-			// $GPRMC,232520.000,A,XXXXXXXX,N,YYYYYYYYYY,W,0.3,326.7,060622,,,A*76
-			rawTime = string(parts[1])
-			rawDate = string(parts[9])
-			break get_time_loop
-		case <-timeout:
-			return fmt.Errorf("stm/setTime: timed out waiting for device")
-		}
-	}
-
-	moduleTime, err := time.Parse("020106150405", rawDate+rawTime)
-	if err != nil {
-		return fmt.Errorf("stm/setTime: %w", err)
-	}
-
-	// Only update date/time on module if it's more than 30 seconds off
-	now := time.Now().UTC()
-	diff := now.Sub(moduleTime)
-	if math.Abs(diff.Seconds()) < 30.0 {
-		return nil
-	}
-
-	fmt.Println("Module date/time is incorrect, setting to host date/time...")
-
-	_, err = s.write(nmea.New("PSTMINITTIME", []string{fmt.Sprintf("%02d,%02d,%04d,%02d,%02d,%02d",
-		now.Day(),
-		now.Month(),
-		now.Year(),
-		now.Hour(),
-		now.Minute(),
-		now.Second(),
-	)}), []byte("INITTIME"))
-	if err != nil {
-		return fmt.Errorf("stm/setTime: %w", err)
-	}
-
-	return nil
 }
