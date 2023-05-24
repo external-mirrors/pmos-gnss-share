@@ -191,7 +191,9 @@ func (s *StmDevice) readlines(device io.Reader, done <-chan struct{}) {
 			defer close(out)
 			scanner := bufio.NewScanner(device)
 			for scanner.Scan() {
-				out <- append(scanner.Bytes(), 0x0D, 0x0A)
+				// Note: this forces a new allocation of the line, so it's not race-y
+				data := append([]byte{}, scanner.Bytes()...)
+				out <- append(data, 0x0D, 0x0A)
 			}
 			if err := scanner.Err(); err != nil {
 				// meh
@@ -215,8 +217,7 @@ func (s *StmDevice) readlines(device io.Reader, done <-chan struct{}) {
 				continue
 			}
 
-			// Note: this forces a new allocation of the line, so it's not race-y
-			if err := s.bus.Publish(internalTopic, append([]byte{}, line...)); err != nil {
+			if err := s.bus.Publish(internalTopic, line); err != nil {
 				fmt.Println("stm readlines unable to publish data: ", err)
 			}
 		}
