@@ -6,8 +6,8 @@ package gnss
 import (
 	"fmt"
 	"sync"
-	"time"
 
+	"github.com/google/uuid"
 	"gitlab.com/postmarketOS/gnss-share/internal/pubsub"
 )
 
@@ -33,9 +33,7 @@ type Gnss struct {
 
 func New(driver GnssDriver) (*Gnss, error) {
 	return &Gnss{
-		// Use the current time as a topic, basically minimal minimal effort to
-		// avoid collisions, which are likely to be rare anyways.
-		dataTopic: fmt.Sprint(time.Now()),
+		dataTopic: uuid.NewString(),
 		driver:    driver,
 		bus:       pubsub.New(pubsub.DefaultBufferSize),
 	}, nil
