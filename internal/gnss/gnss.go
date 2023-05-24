@@ -49,6 +49,15 @@ func (g *Gnss) Save(dir string) error {
 	return g.driver.Save(dir)
 }
 
+// Implements io.Writer
+func (g *Gnss) Write(p []byte) (int, error) {
+	if err := g.bus.Publish(g.writeTopic, p); err != nil {
+		return 0, err
+	}
+
+	return len(p), nil
+}
+
 func (g *Gnss) Subscribe() (*pubsub.Subscription, error) {
 	sub, err := g.bus.Subscribe(g.dataTopic)
 	if err != nil {
