@@ -97,6 +97,7 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription) {
 
 	defer func() {
 		conn.Close()
+		fmt.Println("Client disconnected")
 		if err := sub.Unsubscribe(); err != nil {
 			fmt.Println("server: connection unsubscribe failed: ", err)
 		}
@@ -113,7 +114,7 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription) {
 		// to re-use this slice?
 		msg, ok := <-sub.Messages
 		if !ok {
-			fmt.Println("closing connection: unable to read from client subscription channel")
+			fmt.Println("server: unable to read from client subscription channel")
 			return
 		}
 		// This receive loop will slurp up any data that is in the channel
@@ -132,7 +133,9 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription) {
 		}
 
 		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			fmt.Println("server: client unable to set socket write deadline")
+			if !errors.Is(err, net.ErrClosed) {
+				fmt.Println("server: client unable to set socket write deadline: ", err)
+			}
 			return
 		}
 
@@ -143,7 +146,6 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription) {
 				fmt.Println("server: client hasn't read from socket in 5s, disconnecting it")
 				return
 			}
-			fmt.Println("Client disconnected")
 			return
 		}
 	}
