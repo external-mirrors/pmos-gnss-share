@@ -36,6 +36,7 @@ func New(socket string, sockGroup string) (s *Server) {
 }
 
 func (s *Server) Stop() {
+	// #nosec G104 - ignore socket close failures on purpose
 	s.sock.Close()
 }
 
@@ -56,6 +57,7 @@ func (s *Server) Start(subscriber pubsub.Subscriber, publisher io.Writer) (err e
 		}
 	}()
 
+	// #nosec G302 - group needs R/W access
 	if err := os.Chmod(s.socket, 0660); err != nil {
 		return fmt.Errorf("startServer(): %w", err)
 	}
@@ -84,6 +86,7 @@ func (s *Server) Start(subscriber pubsub.Subscriber, publisher io.Writer) (err e
 			go func() {
 				if sub, err := subscriber.Subscribe(); err != nil {
 					fmt.Println("server: unable to subscribe to topic: ", err)
+					// #nosec G104 - ignore conn close failures on purpose
 					conn.Close()
 				} else {
 					s.clientConnection(conn, sub, publisher)
@@ -100,6 +103,7 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription, pub i
 		// Note: close() could potentially be called twice, e.g. once on socket
 		// read failure and again here, however upon inspection of the Go
 		// implementation for net.Conn.UnixConn this doesn't seem to matter...
+		// #nosec G104 - ignore conn close failures on purpose
 		conn.Close()
 		fmt.Println("Client disconnected")
 		if err := sub.Unsubscribe(); err != nil {
@@ -116,6 +120,7 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription, pub i
 	// the client disconnects.
 	done := make(chan struct{})
 	go func() {
+		// #nosec G307 - ignore conn close failures on purpose
 		defer conn.Close()
 		defer close(done)
 
