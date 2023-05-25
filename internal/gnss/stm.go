@@ -331,7 +331,7 @@ func (s *StmDevice) saveEphemeris(path string) (err error) {
 		return fmt.Errorf("gnss/Stm.saveEphemeris: %w", err)
 	}
 
-	fd, err := os.Create(path)
+	fd, err := os.Create(filepath.Clean(path))
 	if err != nil {
 		err = fmt.Errorf("gnss/Stm.Save: error saving to file %q: %w", path, err)
 		return
@@ -370,7 +370,7 @@ func (s *StmDevice) saveAlamanac(path string) (err error) {
 		return fmt.Errorf("gnss/Stm.saveAlmanac: %w", err)
 	}
 
-	fd, err := os.Create(path)
+	fd, err := os.Create(filepath.Clean(path))
 	if err != nil {
 		return fmt.Errorf("gnss/Stm.saveAlamanac: error saving to file %q: %w", path, err)
 	}
@@ -469,7 +469,7 @@ func (s *StmDevice) resume() (err error) {
 }
 
 func (s *StmDevice) loadEphemeris(path string) (err error) {
-	fd, err := os.Open(path)
+	fd, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		err = fmt.Errorf("gnss/Stm.loadEphemeris: %w", err)
 		return
@@ -509,7 +509,7 @@ func (s *StmDevice) loadEphemeris(path string) (err error) {
 }
 
 func (s *StmDevice) loadAlmanac(path string) (err error) {
-	fd, err := os.Open(path)
+	fd, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		err = fmt.Errorf("gnss/Stm.loadAlmanac: %w", err)
 		return
