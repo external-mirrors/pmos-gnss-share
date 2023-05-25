@@ -24,13 +24,10 @@ DOCS := \
 	gnss-share.1 \
 	gnss-share.conf.5
 
-all: gnss-share stmctl $(DOCS)
+all: gnss-share $(DOCS)
 
 gnss-share: $(GOSRC)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o gnss-share ./cmd/gnss-share
-
-stmctl: $(GOSRC)
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o stmctl ./cmd/stmctl
 
 .PHONY: fmt
 fmt:
@@ -59,12 +56,11 @@ test:
 doc: $(DOCS)
 
 clean:
-	$(RM) $(DOCS) gnss-share stmctl
+	$(RM) $(DOCS) gnss-share
 
-install: gnss-share stmctl $(DOCS)
+install: gnss-share $(DOCS)
 	mkdir -m755 -p $(DESTDIR)$(BINDIR)
 	install -m755 gnss-share $(DESTDIR)$(BINDIR)/
-	install -m755 stmctl $(DESTDIR)$(BINDIR)/
 	mkdir -m755 -p $(DESTDIR)$(SYSCONFDIR)
 	install -m644 gnss-share.conf $(DESTDIR)$(BINDIR)/
 	install -Dm644 gnss-share.1 -t $(DESTDIR)$(MANDIR)/man1/
@@ -73,7 +69,6 @@ install: gnss-share stmctl $(DOCS)
 .PHONY: checkinstall
 checkinstall:
 	test -e $(DESTDIR)$(BINDIR)/gnss-share
-	test -e $(DESTDIR)$(BINDIR)/stmctl
 	test -e $(DESTDIR)$(BINDIR)/gnss-share.conf 
 	test -e $(DESTDIR)$(MANDIR)/man1/gnss-share.1
 	test -e $(DESTDIR)$(MANDIR)/man5/gnss-share.conf.5
@@ -82,7 +77,6 @@ RMDIR_IF_EMPTY:=sh -c '! [ -d $$0 ] || ls -1qA $$0 | grep -q . || rmdir $$0'
 
 uninstall:
 	$(RM) $(DESTDIR)$(BINDIR)/gnss-share
-	$(RM) $(DESTDIR)$(BINDIR)/stmctl
 	$(RM) $(DESTDIR)$(BINDIR)/gnss-share.conf 
 	$(RM) $(DESTDIR)$(MANDIR)/man1/gnss-share.1
 	$(RM) $(DESTDIR)$(MANDIR)/man5/gnss-share.conf.5
