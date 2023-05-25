@@ -95,10 +95,7 @@ func (s *StmDevice) open() error {
 
 	go s.readlines(s.device, s.stopScan)
 
-	// TODO: 3 seconds should be more than enough time for the module to boot.
-	// This is a total hack... but it's simpler than implementing a routine to
-	// read data from the module and look for the response that indicates it
-	// has booted. Obviously this is far from ideal though...........
+	// 3 seconds should be more than enough time for the module to boot.
 	if err := s.ready(time.Duration(3 * time.Second)); err != nil {
 		// Don't hold a ref if the open failed (so that it can be retried later)
 		s.ref.Remove()
