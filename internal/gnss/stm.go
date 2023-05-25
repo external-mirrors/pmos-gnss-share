@@ -271,7 +271,7 @@ func (s *StmDevice) Save(dir string) (err error) {
 		}
 	}()
 
-	err = os.MkdirAll(dir, 0755)
+	err = os.MkdirAll(dir, 0750)
 	if err != nil {
 		return
 	}
