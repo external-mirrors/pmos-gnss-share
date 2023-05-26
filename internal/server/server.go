@@ -176,9 +176,11 @@ func (s *Server) clientConnection(conn net.Conn, sub *pubsub.Subscription, pub i
 		}
 
 		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			if !errors.Is(err, net.ErrClosed) {
-				fmt.Println("server: client unable to set socket write deadline: ", err)
-			}
+			// Note: this is only supported in Go 1.16... uncomment when the
+			// min version is increased to at least that version::
+			// if !errors.Is(err, net.ErrClosed) {
+			// 	fmt.Println("server: client unable to set socket write deadline: ", err)
+			// }
 			return
 		}
 
