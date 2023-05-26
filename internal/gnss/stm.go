@@ -188,7 +188,11 @@ func (s *StmDevice) readlines(device io.Reader, done <-chan struct{}) {
 			for scanner.Scan() {
 				// Note: this forces a new allocation of the line, so it's not race-y
 				data := append([]byte{}, scanner.Bytes()...)
-				out <- append(data, 0x0D, 0x0A)
+				select {
+				case out <- append(data, 0x0D, 0x0A):
+				case <-done:
+					return
+				}
 			}
 			if err := scanner.Err(); err != nil {
 				// meh
