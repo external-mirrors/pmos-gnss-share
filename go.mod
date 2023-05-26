@@ -1,6 +1,6 @@
 module gitlab.com/postmarketOS/gnss-share
 
-go 1.17
+go 1.15
 
 require (
 	github.com/google/uuid v1.3.0
