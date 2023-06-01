@@ -57,8 +57,8 @@ func (s *Server) Start(subscriber pubsub.Subscriber, publisher io.Writer) (err e
 		}
 	}()
 
-	// #nosec G302 - group needs R access
-	if err := os.Chmod(s.socket, 0640); err != nil {
+	// #nosec G302 - group needs R/W access
+	if err := os.Chmod(s.socket, 0660); err != nil {
 		return fmt.Errorf("startServer(): %w", err)
 	}
 
