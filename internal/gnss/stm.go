@@ -119,6 +119,11 @@ func (s *StmDevice) close() error {
 		s.stopScan = nil
 	}
 
+	// Safe shutdown, see: https://gitlab.com/postmarketOS/gnss-share/-/issues/15
+	if err := s.pause(); err != nil {
+		fmt.Println("stm error when closing device: ", err)
+	}
+
 	if err := s.device.Close(); err != nil {
 		return fmt.Errorf("stm failed to close device: %w", err)
 	}
