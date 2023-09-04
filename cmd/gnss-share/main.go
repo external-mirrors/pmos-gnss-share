@@ -57,6 +57,8 @@ func main() {
 		driver = gnss.NewStmGnss(conf.DevicePath, debug)
 	case "stm_serial":
 		driver = gnss.NewStmSerial(conf.DevicePath, conf.BaudRate, debug)
+	case "mm":
+		driver = gnss.NewModemManager(debug)
 	}
 	gnssDevice, err := gnss.New(driver)
 	if err != nil {
