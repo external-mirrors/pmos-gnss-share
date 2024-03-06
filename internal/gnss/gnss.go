@@ -91,6 +91,7 @@ func (g *Gnss) Subscribe() (*pubsub.Subscription, error) {
 
 	// Start the driver if this is the first subscription
 	if g.bus.Subscribers(g.dataTopic) == 1 {
+		fmt.Println("Starting device")
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		g.driverStop = make(chan struct{})
