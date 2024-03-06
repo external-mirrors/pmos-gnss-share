@@ -13,7 +13,8 @@ format is TOML.
 	Group to set as owner for the socket.
 
 *device_driver="<string>"*
-	GPS device driver to use. Supported values: stm, stm_serial
+	GPS device driver to use. Supported values: stm, stm_serial, mm (for
+	ModemManager D-Bus interface)
 
 *device_path="<string>"*
 	Path to GPS device to use, e.g. "/dev/gnss0"
