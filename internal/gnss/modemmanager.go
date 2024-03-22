@@ -20,8 +20,6 @@ const (
 	GpsSetupTimeout = 50 * time.Second
 	// MMModemLocationSource
 	mmModemLocationSourceGpsNmea uint32 = 1 << 2
-	// MMModemState
-	mmModemStateEnabled int32 = 6
 )
 
 type ModemManager struct {
@@ -72,20 +70,6 @@ func (m *ModemManager) ensure_bus() error {
 	return nil
 }
 
-func wait_for_modem_enabled(modem dbus.BusObject, maxwait int) error {
-	var state int32 = -1
-
-	for i := 0; i < maxwait; i++ {
-		err := modem.StoreProperty("org.freedesktop.ModemManager1.Modem.State", &state)
-		if err == nil && state >= mmModemStateEnabled {
-			return nil
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	return fmt.Errorf("modem not enabled after waiting %d seconds", maxwait)
-}
-
 func (m *ModemManager) initialize_modem() error {
 	if err := m.ensure_bus(); err != nil {
 		return err
@@ -115,7 +99,7 @@ func (m *ModemManager) initialize_modem() error {
 	}
 
 	m.modemObj = nil
-	// Find a modemObj which has a GPS NMEA location source and is enabled
+	// Find a modemObj which has GPS NMEA capability
 	for _, path := range paths {
 		var capabilities uint32
 
@@ -124,21 +108,14 @@ func (m *ModemManager) initialize_modem() error {
 		if err != nil || (capabilities&mmModemLocationSourceGpsNmea == 0) {
 			continue
 		}
-		err = wait_for_modem_enabled(modem, 5)
-		if err == nil {
-			if m.debug {
-				fmt.Printf("Modem %s is enabled and has GPS\n", path)
-			}
-			m.modemObj = modem
-			break
-		} else {
-			if m.debug {
-				fmt.Printf("Modem %s: %s\n", path, err)
-			}
+		if m.debug {
+			fmt.Printf("Modem %s has GPS\n", path)
 		}
+		m.modemObj = modem
+		break
 	}
 	if m.modemObj == nil {
-		return fmt.Errorf("could not find enabled modem with GPS capability")
+		return fmt.Errorf("could not find modem with GPS capability")
 	}
 
 	return nil
