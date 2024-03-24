@@ -24,6 +24,8 @@ See `man 1 gnss-share`.
 
 - Go
 
+- ModemManager >=1.23.2 (if using the `mm` driver)
+
 Build the `gnss-share` application with:
 
 ```
