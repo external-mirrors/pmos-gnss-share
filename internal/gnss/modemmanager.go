@@ -23,16 +23,18 @@ const (
 )
 
 type ModemManager struct {
-	modemObj  dbus.BusObject
-	systemBus *dbus.Conn
-	debug     bool
+	modemObj        dbus.BusObject
+	systemBus       *dbus.Conn
+	refreshInterval uint32
+	debug           bool
 }
 
 func NewModemManager(debug bool) *ModemManager {
 	m := ModemManager{
-		modemObj:  nil,
-		systemBus: nil,
-		debug:     debug,
+		modemObj:        nil,
+		systemBus:       nil,
+		refreshInterval: 1,
+		debug:           debug,
 	}
 	return &m
 }
@@ -117,41 +119,118 @@ func (m *ModemManager) initialize_modem() error {
 	if m.modemObj == nil {
 		return fmt.Errorf("could not find modem with GPS capability")
 	}
+	// Add listener for changed ModemLocation properties
+	ctx, cancel = context.WithTimeout(context.Background(), DbusCallTimeout)
+	err := m.systemBus.AddMatchSignalContext(ctx,
+		dbus.WithMatchObjectPath(m.modemObj.Path()),
+		dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
+		dbus.WithMatchMember("PropertiesChanged"),
+		dbus.WithMatchArg(0, "org.freedesktop.ModemManager1.Modem.Location"),
+	)
+	cancel() // Free context resources
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func (m *ModemManager) enable_gps(refresh_interval time.Duration) (uint32, error) {
+func (m *ModemManager) enable_gps() error {
 	var enabled uint32 = 0
 	err := m.modemObj.StoreProperty("org.freedesktop.ModemManager1.Modem.Location.Enabled", &enabled)
 	if err != nil {
-		return 0, fmt.Errorf("unable get enabled location sources: %w", err)
+		return fmt.Errorf("unable to get enabled location sources: %w", err)
 	}
 
-	ctx, cancel_setup := context.WithTimeout(context.Background(), GpsSetupTimeout)
-	err = m.modemObj.CallWithContext(ctx, "org.freedesktop.ModemManager1.Modem.Location.Setup", 0, enabled|mmModemLocationSourceGpsNmea, false).Err
-	cancel_setup() // Free context resources
+	if enabled&mmModemLocationSourceGpsNmea == 0 {
+		var signals_location bool = false
+		err = m.modemObj.StoreProperty("org.freedesktop.ModemManager1.Modem.Location.SignalsLocation", &signals_location)
+		if err != nil {
+			return fmt.Errorf("unable to get SignalsLocation property: %w", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), GpsSetupTimeout)
+		// Don't downgrade anything: Leave sources other than gps-nmea and SignalsLocation as they were
+		err = m.modemObj.CallWithContext(ctx, "org.freedesktop.ModemManager1.Modem.Location.Setup", 0, enabled|mmModemLocationSourceGpsNmea, signals_location).Err
+		cancel() // Free context resources
+		if err != nil {
+			return fmt.Errorf("unable to setup GPS: %w", err)
+		}
+	}
+
+	var refresh_rate uint32 = 0
+	err = m.modemObj.StoreProperty("org.freedesktop.ModemManager1.Modem.Location.GpsRefreshRate", &refresh_rate)
 	if err != nil {
-		return enabled, fmt.Errorf("unable to enable GPS: %w", err)
+		return fmt.Errorf("unable get GpsRefreshRate: %w", err)
+	}
+	// Call SetGpsRefreshRate only if the interval is higher than what we want
+	if refresh_rate > m.refreshInterval {
+		ctx, cancel := context.WithTimeout(context.Background(), DbusCallTimeout)
+		err = m.modemObj.CallWithContext(ctx, "org.freedesktop.ModemManager1.Modem.Location.SetGpsRefreshRate", 0, m.refreshInterval).Err
+		cancel() // Free context resources
+		if err != nil {
+			return fmt.Errorf("unable to set GPS refresh rate: %w", err)
+		}
 	}
 
-	ctx, cancel_setup = context.WithTimeout(context.Background(), DbusCallTimeout)
-	err = m.modemObj.CallWithContext(ctx, "org.freedesktop.ModemManager1.Modem.Location.SetGpsRefreshRate", 0, uint(refresh_interval.Seconds())).Err
-	cancel_setup() // Free context resources
-	if err != nil {
-		return enabled, fmt.Errorf("unable to set GPS refresh rate: %w", err)
-	}
-
-	return enabled, nil
+	return nil
 }
 
-func (m *ModemManager) disable_gps(enabled uint32) {
-	// Disable GPS NMEA, but keep other sources as they were
+func (m *ModemManager) finalize_modem() {
+	// Remove listener for changed ModemLocation properties
 	ctx, cancel := context.WithTimeout(context.Background(), DbusCallTimeout)
-	err := m.modemObj.CallWithContext(ctx, "org.freedesktop.ModemManager1.Modem.Location.Setup", 0, enabled&^mmModemLocationSourceGpsNmea, false).Err
+	err := m.systemBus.RemoveMatchSignalContext(ctx,
+		dbus.WithMatchObjectPath(m.modemObj.Path()),
+		dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
+		dbus.WithMatchMember("PropertiesChanged"),
+		dbus.WithMatchArg(0, "org.freedesktop.ModemManager1.Modem.Location"),
+	)
+	cancel()
+	if err != nil {
+		fmt.Println("unable to remove signal listeners: %w", err)
+	}
+
+	// Disable GPS NMEA, but keep other sources as they were
+	var enabled uint32 = 0
+	err = m.modemObj.StoreProperty("org.freedesktop.ModemManager1.Modem.Location.Enabled", &enabled)
+	if err != nil {
+		fmt.Println("unable get enabled location sources: %w", err)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), DbusCallTimeout)
+	err = m.modemObj.CallWithContext(ctx, "org.freedesktop.ModemManager1.Modem.Location.Setup", 0, enabled&^mmModemLocationSourceGpsNmea, false).Err
 	cancel()
 	if m.debug && err != nil {
 		fmt.Println("Unable to disable GPS location on modem:", err)
+	}
+}
+
+func (m *ModemManager) handle_signal(signal *dbus.Signal) {
+	var enabled uint32 = 0
+	var refresh_rate uint32 = 0
+	var need_reset bool = false
+
+	changed_props := signal.Body[1].(map[string]dbus.Variant)
+
+	if val, ok := changed_props["Enabled"]; ok {
+		val.Store(&enabled)
+		need_reset = (enabled&mmModemLocationSourceGpsNmea == 0) || need_reset
+		if m.debug {
+			fmt.Println("Enabled changed to:", enabled)
+		}
+	}
+	if val, ok := changed_props["GpsRefreshRate"]; ok {
+		val.Store(&refresh_rate)
+		need_reset = refresh_rate > m.refreshInterval || need_reset
+		if m.debug {
+			fmt.Println("GpsRefreshRate changed to:", refresh_rate)
+		}
+	}
+
+	if need_reset {
+		fmt.Println("Re-enabling GPS")
+		if err := m.enable_gps(); err != nil {
+			fmt.Println("Error enabling GPS:", err)
+		}
 	}
 }
 
@@ -160,10 +239,9 @@ func (m *ModemManager) Start(send func(data []byte), write <-chan []byte, stop <
 		return err
 	}
 
-	refresh_interval := 1 * time.Second
+	refresh_interval := time.Duration(m.refreshInterval * uint32(time.Second))
 
 	go func() {
-		var enabled uint32 = 0
 		var errcount = 0
 		const max_errors = 2
 
@@ -180,7 +258,7 @@ func (m *ModemManager) Start(send func(data []byte), write <-chan []byte, stop <
 				if err := m.initialize_modem(); err != nil {
 					fmt.Println("Error initializing modem:", err)
 				} else {
-					if enabled, err = m.enable_gps(refresh_interval); err != nil {
+					if err = m.enable_gps(); err != nil {
 						fmt.Println("Error enabling GPS:", err)
 					} else {
 						break init_loop
@@ -193,7 +271,7 @@ func (m *ModemManager) Start(send func(data []byte), write <-chan []byte, stop <
 					fmt.Println("message received, but mm driver is unable to forward:", string(msg))
 				case signal := <-signalChan:
 					if m.debug {
-						fmt.Println("Signal received:", signal.Name)
+						fmt.Println("Signal received from uninitialized modem:", signal.Name)
 					}
 				case <-time.After(60 * time.Second):
 				}
@@ -202,6 +280,7 @@ func (m *ModemManager) Start(send func(data []byte), write <-chan []byte, stop <
 
 			errcount = 0
 			stopped := false
+			last_loc_time := time.Now().Add(-1 * refresh_interval)
 		poll_loop:
 			// This loop exits either when stopped, or when we get more than
 			// max_errors consecutive errors. In case of errors, initialize again.
@@ -213,13 +292,15 @@ func (m *ModemManager) Start(send func(data []byte), write <-chan []byte, stop <
 				case msg := <-write:
 					fmt.Println("message received, but mm driver is unable to forward:", string(msg))
 				case signal := <-signalChan:
-					if m.debug {
-						fmt.Println("Signal received:", signal.Name)
-					}
-				case <-time.After(refresh_interval): // TODO: make interval configurable
-					loc_ctx, cancel_loc := context.WithTimeout(context.Background(), refresh_interval)
+					m.handle_signal(signal)
+				case <-time.After(time.Until(last_loc_time.Add(refresh_interval))):
+					// Leave select
+				}
+				if time.Since(last_loc_time) > refresh_interval {
+					last_loc_time = time.Now()
+					loc_ctx, cancel := context.WithTimeout(context.Background(), refresh_interval)
 					loc_call := m.modemObj.CallWithContext(loc_ctx, "org.freedesktop.ModemManager1.Modem.Location.GetLocation", 0)
-					cancel_loc()
+					cancel()
 					if loc_call.Err != nil {
 						fmt.Println("ERROR: unable to get location data from response: ", loc_call.Err)
 						errcount++
@@ -227,22 +308,22 @@ func (m *ModemManager) Start(send func(data []byte), write <-chan []byte, stop <
 					}
 					loc := make(map[uint32]dbus.Variant)
 					loc_call.Store(&loc)
-					if val, ok := loc[mmModemLocationSourceGpsNmea]; !ok {
+					val, ok := loc[mmModemLocationSourceGpsNmea]
+					if !ok {
 						// MM can return locations without NMEA data, so this is not an error
 						continue
-					} else {
-						b := []byte{}
-						if err := val.Store(&b); err != nil {
-							fmt.Println("ERROR: unable to Store NMEAs: ", val.String())
-							errcount++
-							continue
-						}
-						// Remove double newlines and add one to the end
-						send(append(
-							bytes.ReplaceAll(b, []byte("\r\n\r\n"), []byte("\r\n")),
-							[]byte("\r\n")...))
-						errcount = 0
 					}
+					b := []byte{}
+					if err := val.Store(&b); err != nil {
+						fmt.Println("ERROR: unable to Store NMEAs: ", val.String())
+						errcount++
+						continue
+					}
+					// Remove double newlines and add one to the end
+					send(append(
+						bytes.ReplaceAll(b, []byte("\r\n\r\n"), []byte("\r\n")),
+						[]byte("\r\n")...))
+					errcount = 0
 				}
 				if errcount >= max_errors {
 					// The modem probably disappeared, so go back to init_loop
@@ -253,8 +334,8 @@ func (m *ModemManager) Start(send func(data []byte), write <-chan []byte, stop <
 					break poll_loop
 				}
 			}
-			// Disable GPS on both modem error and when stopped
-			m.disable_gps(enabled)
+			// Stop modem GPS on both modem error and when stopped
+			m.finalize_modem()
 			m.modemObj = nil
 			// Only exit run_loop (and the goroutine) when stopped.
 			if stopped {
