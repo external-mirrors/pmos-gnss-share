@@ -216,7 +216,10 @@ func (m *ModemManager) handle_signal(signal *dbus.Signal) {
 		return
 	}
 
-	changed_props := signal.Body[1].(map[string]dbus.Variant)
+	changed_props, ok := signal.Body[1].(map[string]dbus.Variant)
+	if !ok {
+		return
+	}
 
 	if val, ok := changed_props["Enabled"]; ok {
 		val.Store(&enabled)
