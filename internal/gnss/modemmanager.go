@@ -209,6 +209,13 @@ func (m *ModemManager) handle_signal(signal *dbus.Signal) {
 	var refresh_rate uint32 = 0
 	var need_reset bool = false
 
+	if signal.Name != "org.freedesktop.DBus.Properties.PropertiesChanged" {
+		if m.debug {
+			fmt.Printf("Received unexpected signal: %s\n", signal.Name)
+		}
+		return
+	}
+
 	changed_props := signal.Body[1].(map[string]dbus.Variant)
 
 	if val, ok := changed_props["Enabled"]; ok {
