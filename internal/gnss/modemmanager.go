@@ -161,7 +161,7 @@ func (m *ModemManager) enable_gps() error {
 	var refresh_rate uint32 = 0
 	err = m.modemObj.StoreProperty("org.freedesktop.ModemManager1.Modem.Location.GpsRefreshRate", &refresh_rate)
 	if err != nil {
-		return fmt.Errorf("unable get GpsRefreshRate: %w", err)
+		return fmt.Errorf("unable to get GpsRefreshRate: %w", err)
 	}
 	// Call SetGpsRefreshRate only if the interval is higher than what we want
 	if refresh_rate > m.refreshInterval {
@@ -187,14 +187,14 @@ func (m *ModemManager) finalize_modem() {
 	)
 	cancel()
 	if err != nil {
-		fmt.Println("unable to remove signal listeners: %w", err)
+		fmt.Println("unable to remove signal listeners:", err)
 	}
 
 	// Disable GPS NMEA, but keep other sources as they were
 	var enabled uint32 = 0
 	err = m.modemObj.StoreProperty("org.freedesktop.ModemManager1.Modem.Location.Enabled", &enabled)
 	if err != nil {
-		fmt.Println("unable get enabled location sources: %w", err)
+		fmt.Println("unable to get enabled location sources:", err)
 	}
 	ctx, cancel = context.WithTimeout(context.Background(), DbusCallTimeout)
 	err = m.modemObj.CallWithContext(ctx, "org.freedesktop.ModemManager1.Modem.Location.Setup", 0, enabled&^mmModemLocationSourceGpsNmea, false).Err
