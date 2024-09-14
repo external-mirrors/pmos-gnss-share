@@ -4,11 +4,13 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"gitlab.com/postmarketOS/gnss-share/internal/config"
@@ -51,6 +53,33 @@ func main() {
 	}
 
 	var driver gnss.GnssDriver
+
+	if conf.Driver == "auto" && strings.HasPrefix(conf.DevicePath, "/dev/gnss") {
+		var gnsssys string
+		gnsssys = strings.Replace(conf.DevicePath, "/dev", "/sys/class/gnss", 1) + "/type"
+		fmt.Printf("gnsssys: %s\n", gnsssys)
+		fd, err := os.Open(gnsssys)
+		if err != nil {
+			log.Fatal()
+		}
+		defer fd.Close()
+
+		scanner := bufio.NewScanner(fd)
+		scanner.Scan()
+		var gnsstype string
+		gnsstype = scanner.Text()
+
+		fmt.Printf("Sysfs reports type: %s\n", gnsstype)
+		switch gnsstype {
+		case "MTK":
+			conf.Driver = "stm"
+		case "NMEA":
+			conf.Driver = "nmea"
+		default:
+			fmt.Printf("Sysfs type is unknown, lets hope it spits out NMEA\n")
+			conf.Driver = "nmea"
+		}
+	}
 
 	switch conf.Driver {
 	case "nmea":
