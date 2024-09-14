@@ -53,6 +53,8 @@ func main() {
 	var driver gnss.GnssDriver
 
 	switch conf.Driver {
+	case "nmea":
+		driver = gnss.NewNMEAGnss(conf.DevicePath, debug)
 	case "stm":
 		driver = gnss.NewStmGnss(conf.DevicePath, debug)
 	case "stm_serial":
