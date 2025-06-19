@@ -1,6 +1,6 @@
 module gitlab.com/postmarketOS/gnss-share
 
-go 1.15
+go 1.17
 
 require (
 	github.com/godbus/dbus/v5 v5.1.0
